@@ -1,16 +1,17 @@
 package lyrics
 
 import (
-	"EbitenLyrics/ttml"
+	"image/color"
+	"log"
 	"strings"
 	"time"
-	"unicode"
 
 	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/hajimehoshi/ebiten/v2/text/v2"
 )
 
 func NewLine(st, et time.Duration, isduet, isbg bool, ts string) *Line {
+
 	return &Line{
 		StartTime:       st,
 		EndTime:         et,
@@ -23,7 +24,169 @@ func NewLine(st, et time.Duration, isduet, isbg bool, ts string) *Line {
 		TranslatedText:  ts,
 		BackgroundLines: []*Line{},
 		Participle:      [][]int{},
+		fontsize:        40,
+		isShow:          true,
 	}
+}
+
+func (l *Line) Layout() {
+	w := l.Position.GetW()
+	// 分词
+	l.Participle = SplitBySpace(l, true)
+	log.Println("分词完成", l.Participle)
+
+	// 计算位置
+	var ls [][]*LineSyllable
+	// 遍历分词结果
+	for _, p := range l.Participle {
+		var syllables []*LineSyllable
+		for _, i := range p {
+			syllables = append(syllables, l.Syllables[i])
+		}
+		ls = append(ls, syllables)
+	}
+	log.Println("分词结果", ls)
+	lineXTL := l.Padding
+	al := text.AlignStart
+	if l.IsDuet {
+		al = text.AlignEnd
+		lineXTL = -l.Padding
+	}
+
+	var poss []Position
+	var height float64
+	poss, height = AutoLayoutSyllable(
+		ls,
+		*l.GetFace(true),
+		w-l.Padding*2,
+		l.lineHeight,
+		1,
+		al,
+	)
+	height += l.Padding * 2
+	log.Println(height, w-l.Padding*2)
+	for _, pos := range poss {
+		log.Println(pos.GetX(), pos.GetH())
+	}
+
+	/*for i, pos := range poss {
+		log.Println(l.Syllables[i].Syllable)
+		//log.Println(pos.GetW(), pos.GetH())
+		log.Println(pos.GetX(), pos.GetW())
+		pos.SetX(pos.GetX() + lineXTL)
+		pos.SetY(pos.GetY() + l.Padding)
+		lastX := pos.GetX()
+		for _, element := range l.Syllables[i].Elements {
+			element.GetPosition().SetX(lastX)
+			element.GetPosition().SetY(pos.GetY())
+
+			lastX += element.SyllableImage.GetWidth()
+		}
+
+	}*/
+
+	idx := 0
+	for _, word := range ls { // 按 ls 的组
+		for range word { // 遍历音节
+			pos := poss[idx]
+
+			syll := l.Syllables[idx]
+
+			pos.SetX(pos.GetX() + lineXTL)
+			pos.SetY(pos.GetY() + l.Padding)
+			lastX := pos.GetX()
+			for _, element := range syll.Elements {
+				element.GetPosition().SetX(lastX)
+				element.GetPosition().SetY(pos.GetY())
+
+				lastX += element.SyllableImage.GetWidth()
+			}
+			log.Println(syll.Syllable)
+			log.Println(pos.GetX(), pos.GetW(), pos.GetH())
+			idx++
+		}
+	}
+
+	tsh := l.GetTranslateImageHeight()
+	l.Position.SetH(height + tsh)
+
+}
+
+// 生成翻译图片
+func (l *Line) GenerateTSImage() {
+	if l.TranslatedText == "" {
+		return
+	}
+	al := text.AlignStart
+	if l.IsDuet {
+		al = text.AlignCenter
+	}
+	poss, h := AutoLayout(
+		l.TranslatedText,
+		&text.GoTextFace{
+			Source: l.Font,
+			Size:   l.fontsize / 2,
+		},
+		l.Position.GetW()-l.Padding*2,
+		l.lineHeight,
+		1,
+		al,
+	)
+	l.TranslateImage = ebiten.NewImage(int(l.Position.GetW()-l.Padding*2), int(h))
+	for i, pos := range poss {
+		log.Println(i, pos.Text, pos.X)
+		op := &text.DrawOptions{}
+		op.GeoM.Translate(
+			pos.X,
+			pos.Y,
+		)
+		op.ColorScale.ScaleWithColor(color.White)
+		op.ColorScale.ScaleAlpha(0.4)
+		text.Draw(l.TranslateImage, pos.Text, &text.GoTextFace{
+			Source: l.Font,
+			Size:   l.fontsize / 2,
+		}, op)
+	}
+}
+
+func (l *Line) GetTranslateImageHeight() float64 {
+	if l.TranslateImage == nil {
+		/*_, h := AutoLayout(
+			l.TranslatedText,
+			&text.GoTextFace{
+				Source: l.Font,
+				Size:   l.fontsize / 2,
+			},
+			l.Position.GetW()-l.Padding*2,
+			l.lineHeight,
+			1,
+			text.AlignStart,
+		)
+		return h*/
+		l.GenerateTSImage()
+
+	}
+	return float64(l.TranslateImage.Bounds().Dy())
+}
+func (l *Line) Draw(screen *ebiten.Image) {
+	if !l.isShow {
+		return
+	}
+	if l.Image == nil {
+		l.Image = ebiten.NewImage(int(l.Position.GetW()), int(l.Position.GetH()))
+	}
+	l.Image.Clear()
+	for _, syllable := range l.Syllables {
+		syllable.Draw(l.Image)
+	}
+
+	// 画翻译
+	if l.TranslateImage != nil {
+		op := &ebiten.DrawImageOptions{}
+		op.GeoM.Translate(l.Padding, l.Position.GetH()-l.GetTranslateImageHeight()-l.Padding)
+		screen.DrawImage(l.TranslateImage, op)
+	}
+	screen.DrawImage(l.Image, nil)
 }
 
 func (l *Line) AddSyllable(syllable *LineSyllable) {
@@ -41,11 +204,44 @@ func (l *Line) SetSyllables(syllables []*LineSyllable) {
 }
 
 // 设置字体
-func (l *Line) SetFont(font text.Face) {
-	l.Font = &font
+func (l *Line) SetFont(font *text.GoTextFaceSource) {
+	l.Font = font
 	for _, syllable := range l.Syllables {
-		syllable.SyllableImage.SetFont(*l.Font)
+		syllable.SetFont(*l.GetFace(true))
 	}
+	l.GenerateTSImage()
+	l.Layout()
+}
+
+func (l *Line) SetFontSize(fontsize float64) {
+	l.fontsize = fontsize
+	for _, syllable := range l.Syllables {
+		syllable.SetFont(*l.GetFace(true))
+	}
+	l.GenerateTSImage()
+	l.Layout()
+}
+
+func (l *Line) GetFace(isc bool) *text.Face {
+	var face text.Face
+	if isc {
+		face = &text.GoTextFace{
+			Source: l.Font,
+			Size:   l.fontsize,
+		}
+		return &face
+	} else {
+		if l.Font != nil {
+			face = &text.GoTextFace{
+				Source: l.Font,
+				Size:   l.fontsize,
+			}
+			return &face
+		} else {
+			return l.Face
+		}
+	}
+
 }
 func (l *Line) AddBackgroundLine(line *Line) {
 	l.BackgroundLines = append(l.BackgroundLines, line)
@@ -65,6 +261,12 @@ func (l *Line) GetTranslatedText() string {
 	return l.TranslatedText
 }
 
+func (l *Line) SetPadding(padding float64) {
+	l.Padding = padding
+}
+func (l *Line) GetPadding() float64 {
+	return l.Padding
+}
 func (l *Line) GetStartTime() time.Duration {
 	return l.StartTime
 }
@@ -78,14 +280,28 @@ func (l *Line) IsInTime(t time.Duration) bool {
 	return t >= l.StartTime && t <= l.EndTime
 }
 func (l *Line) Dispose() {
+	l.isShow = false
 	for _, syllable := range l.Syllables {
 		syllable.Dispose()
 	}
-	l.Syllables = nil
 	for _, bgline := range l.BackgroundLines {
 		bgline.Dispose()
 	}
-	l.BackgroundLines = nil
+	if l.TranslateImage != nil {
+		l.TranslateImage.Deallocate()
+	}
+
+}
+
+func (l *Line) Render() {
+	for _, syllable := range l.Syllables {
+		syllable.Redraw()
+	}
+	for _, bgline := range l.BackgroundLines {
+		bgline.Render()
+	}
+	l.GenerateTSImage()
+	l.isShow = true
 }
 func (l *Line) GetIsDuet() bool {
 	return l.IsDuet
@@ -112,21 +328,12 @@ func (l *Line) SetPosition(pos Position) {
 	l.Position = pos
 }
 
-// isAsciiString 判断字符串是否仅包含 ASCII 字符
-func isAsciiString(s string) bool {
-	for _, r := range s {
-		if r > unicode.MaxASCII {
-			return false
-		}
-	}
-	return true
-}
-func SplitBySpace(line *ttml.LyricLine, includeSpaces bool) [][]int {
+func SplitBySpace(line *Line, includeSpaces bool) [][]int {
 	var result [][]int
 	var currentWordIndices []int
 
-	for index, element := range line.Words {
-		word := element.Word
+	for index, element := range line.Syllables {
+		word := element.Syllable
 
 		// 1. 优先处理纯空格的情况 (即整个 word 都是空白)
 		if strings.TrimSpace(word) == "" {
@@ -193,4 +400,12 @@ func isSingleChineseChar(s string) bool {
 	}
 	r := []rune(s)[0]
 	return isChineseChar(r)
+}
+
+// 宽度变化并且重新渲染
+func (l *Line) Resize(width float64) {
+	l.Dispose()
+	l.Position.SetW(width)
+	l.Layout()
+	l.Render()
 }

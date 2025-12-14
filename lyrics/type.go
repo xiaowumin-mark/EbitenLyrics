@@ -12,10 +12,19 @@ type LineSyllable struct {
 	EndTime   time.Duration // 结束时间
 	Syllable  string        // 音节内容
 
+	Elements []*SyllableElement // 音节元素列表
+
+	Alpha float64 // 当前透明度（用于渐变计算）
+	//Position Position // 音节位置和变换信息
+}
+
+type SyllableElement struct {
+	Text          string
+	Position      Position
 	SyllableImage *SyllableImage // 音节图像数据结构
 	NowOffset     float64        // 当前偏移位置（用于渐变计算）
-	Alpha         float64        // 当前透明度（用于渐变计算）
-	Position      Position       // 音节位置和变换信息
+	//Offset        float64        // 偏移位置
+	Alpha float64 // 当前透明度（用于渐变计算）
 }
 
 type Line struct {
@@ -41,7 +50,11 @@ type Line struct {
 	TranslateImage *ebiten.Image // 渲染该行翻译歌词的图像
 	Position       Position      // 歌词行位置和变换信息
 
-	Font *text.Face
+	Font     *text.GoTextFaceSource
+	fontsize float64
+	Face     *text.Face
+
+	isShow bool
 }
 
 type LyricMeta struct {

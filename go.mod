@@ -12,12 +12,15 @@ require (
 
 require (
 	github.com/asaskevich/EventBus v0.0.0-20200907212545-49d423059eef // indirect
+	github.com/disintegration/imaging v1.6.2 // indirect
 	github.com/ebitengine/gomobile v0.0.0-20250923094054-ea854a63cce1 // indirect
 	github.com/ebitengine/hideconsole v1.0.0 // indirect
 	github.com/ebitengine/purego v0.9.1 // indirect
 	github.com/frustra/bbcode v0.0.0-20201127003707-6ef347fbe1c8 // indirect
 	github.com/go-text/typesetting v0.3.1 // indirect
 	github.com/jezek/xgb v1.2.0 // indirect
+	github.com/muesli/clusters v0.0.0-20180605185049-a07a36e67d36 // indirect
+	github.com/muesli/kmeans v0.3.1 // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect
 	golang.org/x/exp v0.0.0-20251125195548-87e1e737ad39 // indirect
 	golang.org/x/sync v0.19.0 // indirect

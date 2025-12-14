@@ -1,0 +1,29 @@
+package main
+
+var TextureSize vec2
+var Direction vec2 // (1,0) or (0,1)
+
+var Weights [32]float
+var Offsets [32]float
+var SampleCount int
+
+func Fragment(dstPos vec4, srcPos vec2, color vec4) vec4 {
+	pixel := Direction / TextureSize
+
+	var sum vec4
+	for i := 0; i < 32; i++ {
+		if i >= SampleCount {
+			break
+		}
+		offset := pixel * Offsets[i]
+		w := Weights[i]
+
+		if Offsets[i] == 0.0 {
+			sum += imageSrc0At(srcPos) * w
+		} else {
+			sum += imageSrc0At(srcPos + offset) * w
+			sum += imageSrc0At(srcPos - offset) * w
+		}
+	}
+	return sum
+}

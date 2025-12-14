@@ -69,7 +69,7 @@ func main() {
 
 	//log.Println(f.GetAllFonts())
 	initfont()
-
+	ebiten.SetWindowSize(1100, 670)
 	game.animMgr = anim.NewManager(false)
 	router.Add("home", &pages.Home{
 		Font:           game.mplusFaceSource,
@@ -79,12 +79,16 @@ func main() {
 		Font:           game.mplusFaceSource,
 		AnimateManager: game.animMgr,
 	})
+	router.Add("bc", &pages.BC{
+		/*Font:           game.mplusFaceSource,
+		AnimateManager: game.animMgr,*/
+	})
+	router.Add("uv", &pages.BC{})
 
-	router.Go("home", nil)
+	router.Go("uv", nil)
 
 	game.last = time.Now()
 
-	ebiten.SetWindowSize(1100, 670)
 	ebiten.SetWindowTitle("Ebiten Lyrics")
 	ebiten.SetVsyncEnabled(true)
 	ebiten.SetFullscreen(false)

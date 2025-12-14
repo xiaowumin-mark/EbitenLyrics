@@ -1,0 +1,15 @@
+package main
+
+var Center vec2
+var Radius float
+var Strength float
+
+func Fragment(pos vec4, uv vec2, color vec4) vec4 {
+	dir := uv - Center
+	dist := length(dir)
+	if dist < Radius {
+		power := 1.0 - dist/Radius
+		uv += normalize(dir) * power * Strength * 0.02
+	}
+	return imageSrc0At(uv)
+}

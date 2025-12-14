@@ -1,6 +1,9 @@
 package lyrics
 
 import (
+	"strings"
+	"unicode"
+
 	"github.com/hajimehoshi/ebiten/v2/text/v2"
 )
 
@@ -8,6 +11,112 @@ type LayoutLine struct {
 	Text string
 	X    float64
 	Y    float64
+}
+
+func AutoLayout(
+	textStr string,
+	face text.Face,
+	maxWidth float64,
+	lineSpacing float64,
+	fh float64,
+	align text.Align,
+) ([]LayoutLine, float64) {
+
+	// 1️⃣ 行高计算
+	metrics := face.Metrics()
+	ascent := float64(metrics.HAscent) * fh
+	descent := float64(metrics.HDescent) * fh
+	lineHeight := ascent + descent
+	lineStep := lineHeight + lineSpacing
+
+	// 2️⃣ 测量函数（像素）
+	measure := func(s string) float64 {
+		w, _ := text.Measure(s, face, 0)
+		return float64(w) * fh
+	}
+
+	// 3️⃣ 分词（中文按字，英文按词，空格保留）
+	var tokens []string
+	var buf strings.Builder
+
+	flushBuf := func() {
+		if buf.Len() > 0 {
+			tokens = append(tokens, buf.String())
+			buf.Reset()
+		}
+	}
+
+	for _, r := range textStr {
+		switch {
+		case r == '\n':
+			flushBuf()
+			tokens = append(tokens, "\n")
+
+		case r == ' ':
+			flushBuf()
+			tokens = append(tokens, " ")
+
+		case r <= 0x7f && (unicode.IsLetter(r) || unicode.IsDigit(r)):
+			buf.WriteRune(r)
+
+		default:
+			flushBuf()
+			tokens = append(tokens, string(r))
+		}
+	}
+	flushBuf()
+
+	// 4️⃣ 自动换行（token 级）
+	var lines []string
+	current := ""
+
+	for _, tok := range tokens {
+		if tok == "\n" {
+			lines = append(lines, current)
+			current = ""
+			continue
+		}
+
+		if current == "" {
+			current = tok
+			continue
+		}
+
+		if measure(current+tok) > maxWidth {
+			lines = append(lines, current)
+			current = tok
+		} else {
+			current += tok
+		}
+	}
+
+	if current != "" {
+		lines = append(lines, current)
+	}
+
+	// 5️⃣ 生成布局
+	var layout []LayoutLine
+	for i, line := range lines {
+		w := measure(line)
+		x := 0.0
+		switch align {
+		case text.AlignCenter:
+			x = (maxWidth - w) / 2
+		case text.AlignEnd:
+			x = maxWidth - w
+		}
+		if x < 0 {
+			x = 0
+		}
+		layout = append(layout, LayoutLine{
+			Text: line,
+			X:    x,
+			Y:    float64(i) * lineStep,
+		})
+	}
+
+	totalHeight := float64(len(lines)) * lineStep
+	return layout, totalHeight
 }
 
 func AutoLayoutSyllable(

@@ -1,0 +1,66 @@
+//kage:unit pixels
+
+package main
+
+var Time float
+var Resolution vec2
+
+// 随机函数
+func rand(co vec2) float {
+	return fract(sin(dot(co, vec2(12.9898, 4.1414))) * 43758.5453)
+}
+
+// 噪声函数
+func noise(p vec2) float {
+	ip := floor(p)
+	u := fract(p)
+	u = u * u * (3.0 - 2.0*u)
+	
+	res := mix(
+		mix(rand(ip), rand(ip+vec2(1.0, 0.0)), u.x),
+		mix(rand(ip+vec2(0.0, 1.0)), rand(ip+vec2(1.0, 1.0)), u.x),
+		u.y,
+	)
+	return res * res
+}
+
+// FBM (Fractal Brownian Motion) - Apple Music 版本
+func fbm(p vec2) float {
+	f := 0.0
+	mtx := mat2(0.80, 0.60, -0.60, 0.80)
+	
+	// 第一层:主要的时间驱动层
+	f += 0.050000 * noise(p + Time*0.2) + Time*0.008
+	p = mtx * p * 2.02
+	
+	// 第二层
+	f += 0.031250 * noise(p)
+	p = mtx * p * 2.01
+	
+	// 第三层
+	f += 0.250000 * noise(p)
+	p = mtx * p * 2.03
+	
+	return f / 0.96875
+}
+
+// 多层 FBM 模式
+func pattern(p vec2) float {
+	return fbm(p + fbm(p + fbm(p)))
+}
+
+func Fragment(position vec4, texCoord vec2, color vec4) vec4 {
+	// 关键修正:使用 position.xy (像素坐标) 而不是 texCoord
+	// 并且除以 Resolution.x 来保持纵横比
+	uv := position.xy / Resolution.x
+	
+	// 计算流动强度 (0~1)
+	shade := pattern(uv) / 2.0
+	
+	// 从颜色条采样
+	// y 坐标固定为 0.5（因为颜色条高度只有1像素）
+	colorSample := imageSrc0At(vec2(shade, 0.5))
+	
+	// 返回颜色,透明度固定为 0.5
+	return vec4(colorSample.rgb, 0.5)
+}

@@ -120,10 +120,9 @@ func CreateGradientImage(width, height int, fd float64, startColor, endColor col
 	return gradientImage, offset
 }
 
-func (s *SyllableImage) Draw(img *ebiten.Image, offset float64, alpha float64) {
+func (s *SyllableImage) Draw(img *ebiten.Image, offset float64, alpha float64, pos *Position) {
 	if s.TextMask == nil || s.GradientImage == nil {
-		// 重绘
-		s.Redraw()
+		return
 	}
 	s.tempImage.Clear()
 	opts := &ebiten.DrawImageOptions{}
@@ -140,23 +139,15 @@ func (s *SyllableImage) Draw(img *ebiten.Image, offset float64, alpha float64) {
 
 	finalop := &ebiten.DrawImageOptions{}
 	finalop.Filter = ebiten.FilterLinear
+	finalop.GeoM = TransformToGeoM(pos)
 	img.DrawImage(s.tempImage, finalop)
 
 }
 
 func (s *SyllableImage) Dispose() {
-	s.TextMask.Deallocate()
-	s.GradientImage.Deallocate()
 	s.tempImage.Deallocate()
-	s.TextMask = nil
-	s.GradientImage = nil
-	s.tempImage = nil
-	s.Font = nil
-	s.Text = ""
-	s.StartColor = color.RGBA{}
-	s.EndColor = color.RGBA{}
-	s.Fd = 0
-	s = nil
+	s.GradientImage.Deallocate()
+	s.TextMask.Deallocate()
 }
 
 func (s *SyllableImage) GetWidth() float64 {
@@ -187,9 +178,10 @@ func generateBackgroundFadeStyle(elementWidth, elementHeight, fadeRatio float64)
 
 // 重绘函数
 func (s *SyllableImage) Redraw() {
-	s.tempImage.Deallocate()
+	/*s.tempImage.Deallocate()
 	s.GradientImage.Deallocate()
-	s.TextMask.Deallocate()
+	s.TextMask.Deallocate()*/
+	s.Dispose()
 	// 重新创建文字蒙版和渐变图像
 	// 计算文字宽高
 	tw, th := text.Measure(

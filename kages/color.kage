@@ -1,0 +1,22 @@
+// kages/color.kage
+package main
+
+func Fragment(pos vec4, uv vec2, color vec4) vec4 {
+    // ❌ 错误：c := color  <-- 这只是顶点色，不是图片像素
+    
+    // ✅ 正确：采样 Image[0] 在当前 uv 坐标的颜色
+    c := imageSrc0UnsafeAt(uv) 
+
+    // saturate (饱和度)
+    gray := dot(c.rgb, vec3(0.299, 0.587, 0.114))
+    c.rgb = mix(vec3(gray), c.rgb, 1.2) // 这里 1.2 最好改成 Uniform 传入，目前写死也没事
+
+    // brightness (亮度)
+    c.rgb *= 0.6
+
+    // contrast (对比度)
+    c.rgb = (c.rgb - 0.5) * 0.3 + 0.5
+
+    // 保持原本的 alpha 通道
+    return c * color.a 
+}
