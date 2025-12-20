@@ -22,26 +22,25 @@ type Position struct {
 // transform: translate + rotate + scale (与 CSS 一致)
 // ------------------------------------------------------
 
-func TransformToGeoM(p *Position) (m ebiten.GeoM) {
-	m = ebiten.GeoM{}
+func TransformToGeoM(p *Position) ebiten.GeoM {
+	m := ebiten.GeoM{}
 
-	// 1) 把图像移到原点，使 Origin 成为 (0,0)
+	// 1. 设置中心点：先将图像的中心点移到 (0,0)
 	m.Translate(-p.OriginX, -p.OriginY)
 
-	// 2) Scale（绕 origin）
+	// 2. 执行缩放
 	m.Scale(p.ScaleX, p.ScaleY)
 
-	// 3) Rotate（绕 origin）
+	// 3. 执行旋转
 	r := p.Rotate * math.Pi / 180
 	m.Rotate(r)
 
-	// 4) 移回 origin
-	m.Translate(p.OriginX, p.OriginY)
+	// 4. 将中心点移回到它在世界坐标中应该在的位置
+	// 这里直接加上 (X + OriginX) 才能保证物体中心就在 X, Y 指定的位置
+	// 或者按照你的逻辑：平移到 X, Y 加上偏移
+	m.Translate(p.X+p.TranslateX+p.OriginX, p.Y+p.TranslateY+p.OriginY)
 
-	// 5) 最终平移位置：X,Y + TranslateX,Y
-	m.Translate(p.X+p.TranslateX, p.Y+p.TranslateY)
-
-	return
+	return m
 }
 
 // ------------------------------------------------------

@@ -21,10 +21,12 @@ func NewSyllable(
 	needSptext bool,
 ) (*LineSyllable, error) {
 	var eles []*SyllableElement
+	runes := []rune(text)
 	if needSptext {
 		lastX := 0.0
+		stepTime := (endTime - startTime) / time.Duration(len(text))
 		// 逐字拆分text
-		for _, t := range text {
+		for i, t := range runes {
 			syllableImage, err := CreateSyllableImage(
 				string(t),
 				font,
@@ -41,6 +43,8 @@ func NewSyllable(
 				SyllableImage: syllableImage,
 				NowOffset:     syllableImage.Offset,
 				Alpha:         1,
+				StartTime:     startTime + stepTime*time.Duration(i),
+				EndTime:       stepTime * time.Duration(i+1),
 			})
 			lastX += syllableImage.Width
 		}
@@ -61,6 +65,8 @@ func NewSyllable(
 			SyllableImage: syllableImage,
 			NowOffset:     syllableImage.Offset,
 			Alpha:         1,
+			StartTime:     startTime,
+			EndTime:       endTime,
 		})
 	}
 	return &LineSyllable{

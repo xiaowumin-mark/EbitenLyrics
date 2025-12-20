@@ -26,13 +26,7 @@ type Game struct {
 }
 
 func (g *Game) Update() error {
-	now := time.Now()
-	if g.last.IsZero() {
-		g.last = now
-	}
-	dt := now.Sub(g.last)
-	g.last = now
-	g.animMgr.Update(dt)
+
 	w, h := ebiten.WindowSize()
 	// 如果是页面刚刚切换过来，立即触发一次 isFirst=true
 	if router.NeedFirstResize() {
@@ -57,6 +51,13 @@ func (g *Game) Update() error {
 }
 
 func (g *Game) Draw(screen *ebiten.Image) {
+	now := time.Now()
+	if g.last.IsZero() {
+		g.last = now
+	}
+	dt := now.Sub(g.last)
+	g.last = now
+	g.animMgr.Update(dt)
 	screen.Clear()
 	router.Current().Draw(screen)
 }
@@ -79,23 +80,22 @@ func main() {
 		Font:           game.mplusFaceSource,
 		AnimateManager: game.animMgr,
 	})
-	router.Add("bc", &pages.BC{
-		/*Font:           game.mplusFaceSource,
-		AnimateManager: game.animMgr,*/
-	})
-	router.Add("uv", &pages.BC{})
 
-	router.Go("uv", nil)
+	router.Go("game", nil)
 
 	game.last = time.Now()
 
 	ebiten.SetWindowTitle("Ebiten Lyrics")
 	ebiten.SetVsyncEnabled(true)
 	ebiten.SetFullscreen(false)
+	ebiten.SetTPS(60)
 
 	ebiten.SetWindowResizingMode(ebiten.WindowResizingModeEnabled)
 	go ws.Initws()
-	if err := ebiten.RunGame(&game); err != nil {
+	if err := ebiten.RunGameWithOptions(&game, &ebiten.RunGameOptions{
+		X11ClassName:    "Ebiten Lyrics",
+		X11InstanceName: "Ebiten Lyrics",
+	}); err != nil {
 		log.Fatal(err)
 	}
 }

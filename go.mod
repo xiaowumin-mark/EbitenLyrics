@@ -18,6 +18,8 @@ require (
 	github.com/ebitengine/purego v0.9.1 // indirect
 	github.com/frustra/bbcode v0.0.0-20201127003707-6ef347fbe1c8 // indirect
 	github.com/go-text/typesetting v0.3.1 // indirect
+	github.com/go-viper/mapstructure/v2 v2.4.0 // indirect
+	github.com/google/uuid v1.6.0 // indirect
 	github.com/jezek/xgb v1.2.0 // indirect
 	github.com/muesli/clusters v0.0.0-20180605185049-a07a36e67d36 // indirect
 	github.com/muesli/kmeans v0.3.1 // indirect

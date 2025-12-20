@@ -20,7 +20,11 @@ github.com/go-text/typesetting v0.3.1 h1:ESHfFntFnJOigjEeEiTc3OGXqggC1eSAAqHkG9Z
 github.com/go-text/typesetting v0.3.1/go.mod h1:vIRUT25mLQaSh4C8H/lIsKppQz/Gdb8Pu/tNwpi52ts=
 github.com/go-text/typesetting-utils v0.0.0-20250618110550-c820a94c77b8 h1:4KCscI9qYWMGTuz6BpJtbUSRzcBrUSSE0ENMJbNSrFs=
 github.com/go-text/typesetting-utils v0.0.0-20250618110550-c820a94c77b8/go.mod h1:3/62I4La/HBRX9TcTpBj4eipLiwzf+vhI+7whTc9V7o=
+github.com/go-viper/mapstructure/v2 v2.4.0 h1:EBsztssimR/CONLSZZ04E8qAkxNYq4Qp9LvH92wZUgs=
+github.com/go-viper/mapstructure/v2 v2.4.0/go.mod h1:oJDH3BJKyqBA2TXFhDsKDGDTlndYOZ6rGS0BRZIxGhM=
 github.com/golang/freetype v0.0.0-20170609003504-e2365dfdc4a0/go.mod h1:E/TSTwGwJL78qG/PmXZO1EjYhfJinVAhrmmHX6Z8B9k=
+github.com/google/uuid v1.6.0 h1:NIvaJDMOsjHA8n1jAhLSgzrAzy1Hgr+hNrb57e+94F0=
+github.com/google/uuid v1.6.0/go.mod h1:TIyPZe4MgqvfeYDBFedMoGGpEw/LqOeaOT+nhxU+yHo=
 github.com/gorilla/websocket v1.5.3 h1:saDtZ6Pbx/0u+bgYQ3q96pZgCzfhKXGPqt7kZ72aNNg=
 github.com/gorilla/websocket v1.5.3/go.mod h1:YR8l580nyteQvAITg2hZ9XVh4b55+EU/adAjf1fMHhE=
 github.com/hajimehoshi/bitmapfont/v4 v4.1.0 h1:eE3qa5Do4qhowZVIHjsrX5pYyyPN6sAFWMsO7QREm3U=

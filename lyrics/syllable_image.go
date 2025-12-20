@@ -126,14 +126,13 @@ func (s *SyllableImage) Draw(img *ebiten.Image, offset float64, alpha float64, p
 	}
 	s.tempImage.Clear()
 	opts := &ebiten.DrawImageOptions{}
-	opts.Filter = ebiten.FilterLinear
 	s.tempImage.DrawImage(s.TextMask, opts)
 
 	// 绘制渐变图像
 	op := &ebiten.DrawImageOptions{}
 	op.Blend = ebiten.BlendSourceIn
 	op.GeoM.Translate(offset, 0)
-	op.GeoM.Scale(1, s.Height*1.5) // 高度缩放到和文字蒙版一样高
+	op.GeoM.Scale(1, s.Height) // 高度缩放到和文字蒙版一样高
 	op.ColorScale.ScaleAlpha(float32(alpha))
 	s.tempImage.DrawImage(s.GradientImage, op)
 
@@ -217,7 +216,7 @@ func (s *SyllableImage) SetFont(f text.Face) {
 func (s *SyllableImage) SetStartColor(c color.RGBA) {
 	s.StartColor = c
 	// 只需要重绘渐变图像
-	s.GradientImage.Clear()
+	s.GradientImage.Deallocate()
 	s.GradientImage, s.Offset = CreateGradientImage(
 		int(s.Width),
 		int(s.Height),
@@ -229,7 +228,7 @@ func (s *SyllableImage) SetStartColor(c color.RGBA) {
 func (s *SyllableImage) SetEndColor(c color.RGBA) {
 	s.EndColor = c
 	// 只需要重绘渐变图像
-	s.GradientImage.Clear()
+	s.GradientImage.Deallocate()
 	s.GradientImage, s.Offset = CreateGradientImage(
 		int(s.Width),
 		int(s.Height),
@@ -241,7 +240,7 @@ func (s *SyllableImage) SetEndColor(c color.RGBA) {
 func (s *SyllableImage) SetFd(fd float64) {
 	s.Fd = fd
 	// 只需要重绘渐变图像
-	s.GradientImage.Clear()
+	s.GradientImage.Deallocate()
 	s.GradientImage, s.Offset = CreateGradientImage(
 		int(s.Width),
 		int(s.Height),

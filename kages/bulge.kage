@@ -1,15 +1,52 @@
+//kage:unit pixels
+
 package main
 
-var Center vec2
-var Radius float
-var Strength float
+var Center vec2   // 归一化中心点 (0.0 - 1.0)
+var Radius float  // 像素半径
+var Strength float // 强度
 
-func Fragment(pos vec4, uv vec2, color vec4) vec4 {
-	dir := uv - Center
-	dist := length(dir)
-	if dist < Radius {
-		power := 1.0 - dist/Radius
-		uv += normalize(dir) * power * Strength * 0.02
-	}
-	return imageSrc0At(uv)
+func Fragment(dstPos vec4, srcPos vec2, color vec4) vec4 {
+    imgSize := imageSrc0Size()
+    
+    // 1. 转为 UV 坐标 (0.0 - 1.0)
+    uv := srcPos / imgSize
+    
+    // 2. 计算相对于中心的偏移
+    delta := uv - Center
+    
+    // 计算 aspect ratio (宽高比修正)，否则圆形扭曲会被拉扁
+    aspect := imgSize.x / imgSize.y
+    deltaCorrected := delta
+    deltaCorrected.x *= aspect
+    
+    // 计算距离 (基于像素或修正后的UV)
+    dist := length(delta * imgSize)
+    
+    // 3. 应用扭曲
+    // 使用平滑的衰减函数
+    if dist < Radius {
+        // 归一化距离 (0.0 在中心, 1.0 在边缘)
+        percent := dist / Radius
+        
+        // 使用余弦函数让过渡更平滑，避免中心太尖锐
+        // 当 Strength 为负时 (如 -0.5)，会产生膨胀效果
+        if Strength != 0.0 {
+            // 简单的二次衰减或者余弦衰减
+            factor := (1.0 - percent) * (1.0 - percent) * Strength
+            
+            // 关键：为了产生膨胀感，我们需要去采样“更靠近中心”的点
+            // 这里的 math 是：目标UV = 当前UV - 偏移量
+            // 但为了保持通用性，我们调整 UV
+            uv -= delta * factor
+        }
+    }
+    
+    // 4. 边缘处理 (Clamp)
+    // 如果 UV 跑出去了，强行限制在 0.001 ~ 0.999 之间
+    // 这样边缘的像素会被无限拉伸，而不是显示黑边
+    uv = clamp(uv, vec2(0.001), vec2(0.999))
+    
+    // 5. 采样颜色
+    return imageSrc0At(uv * imgSize)
 }
