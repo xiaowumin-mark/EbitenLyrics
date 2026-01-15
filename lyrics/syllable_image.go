@@ -112,7 +112,6 @@ func CreateGradientImage(width, height int, fd float64, startColor, endColor col
 			r := uint8((float64(startColor.R) + (float64(endColor.R)-float64(startColor.R))*t) * (float64(a) / 255.0))
 			g := uint8((float64(startColor.G) + (float64(endColor.G)-float64(startColor.G))*t) * (float64(a) / 255.0))
 			b := uint8((float64(startColor.B) + (float64(endColor.B)-float64(startColor.B))*t) * (float64(a) / 255.0))
-
 			c = color.RGBA{R: r, G: g, B: b, A: a}
 		}
 		gradientImage.Set(x, 0, c)

@@ -21,12 +21,12 @@ func NewSyllable(
 	needSptext bool,
 ) (*LineSyllable, error) {
 	var eles []*SyllableElement
-	runes := []rune(text)
 	if needSptext {
+
 		lastX := 0.0
 		stepTime := (endTime - startTime) / time.Duration(len(text))
 		// 逐字拆分text
-		for i, t := range runes {
+		for i, t := range text {
 			syllableImage, err := CreateSyllableImage(
 				string(t),
 				font,
@@ -37,14 +37,17 @@ func NewSyllable(
 			if err != nil {
 				return nil, err
 			}
+			po := NewPosition(lastX, 0, syllableImage.Width, syllableImage.Height)
+			po.OriginX = po.GetW() / 2
+			po.OriginY = po.GetH() * 6 / 5
 			eles = append(eles, &SyllableElement{
 				Text:          string(t),
-				Position:      NewPosition(lastX, 0, syllableImage.Width, syllableImage.Height),
+				Position:      po,
 				SyllableImage: syllableImage,
 				NowOffset:     syllableImage.Offset,
 				Alpha:         1,
 				StartTime:     startTime + stepTime*time.Duration(i),
-				EndTime:       stepTime * time.Duration(i+1),
+				EndTime:       stepTime*time.Duration(i+1) + startTime,
 			})
 			lastX += syllableImage.Width
 		}
@@ -59,9 +62,12 @@ func NewSyllable(
 		if err != nil {
 			return nil, err
 		}
+		po := NewPosition(0, 0, syllableImage.Width, syllableImage.Height)
+		po.OriginX = po.GetW() / 2
+		po.OriginY = po.GetH() * 6 / 5
 		eles = append(eles, &SyllableElement{
 			Text:          text,
-			Position:      NewPosition(0, 0, syllableImage.Width, syllableImage.Height),
+			Position:      po,
 			SyllableImage: syllableImage,
 			NowOffset:     syllableImage.Offset,
 			Alpha:         1,
@@ -81,6 +87,18 @@ func NewSyllable(
 
 func (ls *LineSyllable) Draw(screen *ebiten.Image) {
 	for _, ele := range ls.Elements {
+
+		if ele.BackgroundBlurText != nil {
+
+			// 画文本背景模糊
+			ele.BackgroundBlurText.Draw(
+				screen,
+				ele.Position.GetX()+ele.Position.GetTranslateX(),
+				ele.Position.GetY()+ele.Position.GetTranslateY(),
+			)
+
+		}
+
 		ele.SyllableImage.Draw(screen, ele.NowOffset, ele.Alpha, &ele.Position)
 	}
 }
@@ -131,6 +149,12 @@ func (ls *LineSyllable) SetFont(f text.Face) {
 		ele.SyllableImage.SetFont(f)
 		lastX += ele.SyllableImage.GetWidth()
 		ele.GetPosition().SetX(lastX)
+		ele.GetPosition().SetOriginX(
+			ele.GetPosition().GetW() / 2,
+		)
+		ele.GetPosition().SetOriginY(
+			ele.GetPosition().GetH() * 6 / 5,
+		)
 	}
 
 }
@@ -138,5 +162,11 @@ func (ls *LineSyllable) SetFont(f text.Face) {
 func (ls *LineSyllable) Redraw() {
 	for _, ele := range ls.Elements {
 		ele.SyllableImage.Redraw()
+		ele.GetPosition().SetOriginX(
+			ele.GetPosition().GetW() / 2,
+		)
+		ele.GetPosition().SetOriginY(
+			ele.GetPosition().GetH() * 6 / 5,
+		)
 	}
 }

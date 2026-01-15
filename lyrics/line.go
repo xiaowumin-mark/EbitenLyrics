@@ -61,7 +61,7 @@ func (l *Line) Layout() {
 	poss, height = AutoLayoutSyllable(
 		ls,
 		*l.GetFace(true),
-		w-l.Padding*2,
+		w-l.Padding,
 		l.lineHeight,
 		1,
 		al,
@@ -116,6 +116,19 @@ func (l *Line) Layout() {
 	}
 
 	l.GetPosition().SetH(height + l.TranslateImageH)
+	l.GetPosition().SetOriginY(
+		l.GetPosition().GetH() / 2,
+	)
+	if l.IsDuet {
+		l.GetPosition().SetOriginX(l.GetPosition().GetW())
+	} else {
+		l.GetPosition().SetOriginX(0)
+	}
+	if l.IsBackground {
+		l.GetPosition().SetOriginY(
+			l.GetPosition().GetH(),
+		)
+	}
 }
 
 // 生成翻译图片
@@ -328,7 +341,7 @@ func (l *Line) Render() {
 	}
 	l.GenerateTSImage()
 	l.Image = ebiten.NewImage(int(l.GetPosition().GetW()), int(l.GetPosition().GetH()))
-	log.Println("渲染歌词行")
+	//log.Println("渲染歌词行")
 }
 func (l *Line) GetIsDuet() bool {
 	return l.IsDuet
@@ -491,11 +504,18 @@ func isSingleChineseChar(s string) bool {
 
 // 宽度变化并且重新渲染
 func (l *Line) Resize(width float64) {
-	//state := l.isShow // 记录状态
-	//l.Dispose()
-	l.GetPosition().SetW(width)
+	l.GetPosition().SetW(width * 0.8)
+	if l.IsDuet {
+		l.GetPosition().SetX(width - l.GetPosition().GetW())
+	}
 	l.GenerateTSImage()
 	l.Layout()
+	if !l.isShow {
+		return
+	}
+	//state := l.isShow // 记录状态
+	//l.Dispose()
+
 	//if state {
 	//l.Render()
 	//}
@@ -506,5 +526,44 @@ func (l *Line) Resize(width float64) {
 	// bg
 	for _, bgline := range l.BackgroundLines {
 		bgline.Resize(width)
+	}
+}
+
+func (l *Line) DisposeAllAnimations() {
+	if l.ScrollAnimate != nil {
+		l.ScrollAnimate.Cancel()
+		l.ScrollAnimate = nil
+	}
+	if l.AlphaAnimate != nil {
+		l.AlphaAnimate.Cancel()
+		l.AlphaAnimate = nil
+	}
+	//GradientColorAnimate
+	if l.GradientColorAnimate != nil {
+		l.GradientColorAnimate.Cancel()
+		l.GradientColorAnimate = nil
+	}
+	//ScaleAnimate
+	if l.ScaleAnimate != nil {
+		l.ScaleAnimate.Cancel()
+		l.ScaleAnimate = nil
+	}
+
+	for _, e := range l.OuterSyllableElements {
+		//Animate
+		if e.Animate != nil {
+			e.Animate.Cancel()
+			e.Animate = nil
+		}
+		//HighlightAnimate
+		if e.HighlightAnimate != nil {
+			e.HighlightAnimate.Cancel()
+			e.HighlightAnimate = nil
+		}
+		//UpAnimate
+		if e.UpAnimate != nil {
+			e.UpAnimate.Cancel()
+			e.UpAnimate = nil
+		}
 	}
 }

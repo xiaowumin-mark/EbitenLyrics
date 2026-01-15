@@ -40,7 +40,7 @@ func (g *Game) OnEnter(params map[string]any) {
 	g.fontsize = 48.0
 
 	// 读取Bejeweled.ttml
-	file, err := os.Open("E:\\projects\\visual-lyric\\music\\ME!.ttml")
+	file, err := os.Open("E:\\projects\\visual-lyric\\music\\Opalite.ttml")
 	if err != nil {
 		log.Fatal(err)
 	}

@@ -10,7 +10,7 @@ import (
 	"github.com/hajimehoshi/ebiten/v2"
 )
 
-var CustomElastic = anim.NewEaseInElastic(1.1, 1.5)
+var CustomElastic = anim.NewEaseInElastic(1.05, 1.5)
 
 func (l *Lyrics) Scroll(index []int, notInit int) {
 	if len(l.Lines) == 0 {
@@ -29,15 +29,15 @@ func (l *Lyrics) Scroll(index []int, notInit int) {
 	l.renderIndex = renderIndex
 	log.Println("渲染的歌词", renderIndex)
 
-	for index, el := range l.Lines {
-		if has(renderIndex, index) {
+	for i, el := range l.Lines {
+		if has(renderIndex, i) {
 			el.Render()
 		} else {
 			el.Dispose()
 
 		}
 
-		if (el.Status == Buffered || el.Status == Hot) && !has(l.nowLyrics, index) {
+		if (el.Status == Buffered || el.Status == Hot) && !has(index, i) {
 			//toNormal(el, game)
 			el.ToNormal(l)
 
@@ -173,10 +173,33 @@ func (l *Lyrics) Update(t time.Duration) {
 			}
 			// 如果不在nowindex中，则加入
 			l.nowLyrics = append(l.nowLyrics, i)
+			l.nowLyrics = bubbleSort(l.nowLyrics)
 			log.Println("歌词进入：", i, l.nowLyrics, line.Text)
 
 			line.Status = Hot
-			l.Scroll(bubbleSort(l.nowLyrics), 1)
+			l.Scroll(l.nowLyrics, 1)
+
+			// 放大动画
+			if line.ScaleAnimate != nil {
+				line.ScaleAnimate.Cancel()
+				line.ScaleAnimate = nil
+			}
+			line.ScaleAnimate = anim.NewTween(
+				uuid.NewString(),
+				time.Duration(500)*time.Millisecond,
+				0,
+				1,
+				line.GetPosition().GetScaleX(),
+				1.03,
+				anim.EaseInOut,
+				func(value float64) {
+					line.GetPosition().SetScaleX(value)
+					line.GetPosition().SetScaleY(value)
+				},
+				func() {
+				},
+			)
+			l.AnimateManager.Add(line.ScaleAnimate)
 
 			line.LineAnimate(l)
 
@@ -185,6 +208,29 @@ func (l *Lyrics) Update(t time.Duration) {
 			if has(l.nowLyrics, i) {
 				l.nowLyrics = remove(l.nowLyrics, i)
 				log.Println("歌词退出：", i)
+
+				// 缩小动画
+				if line.ScaleAnimate != nil {
+					line.ScaleAnimate.Cancel()
+					line.ScaleAnimate = nil
+				}
+				line.ScaleAnimate = anim.NewTween(
+					uuid.NewString(),
+					time.Duration(600)*time.Millisecond,
+					0,
+					1,
+					line.GetPosition().GetScaleX(),
+					1,
+					anim.EaseInOut,
+					func(value float64) {
+						line.GetPosition().SetScaleX(value)
+						line.GetPosition().SetScaleY(value)
+					},
+					func() {
+					},
+				)
+				l.AnimateManager.Add(line.ScaleAnimate)
+
 				line.Status = Buffered
 			}
 		}
@@ -251,9 +297,16 @@ func (l *Line) ToNormal(lyrics *Lyrics) {
 
 		},
 	)*/
+
+	// 结束逐字动画
 	for _, e := range l.OuterSyllableElements {
+		if e.Animate != nil {
+			e.Animate.Cancel()
+			e.Animate = nil
+		}
 		e.NowOffset = e.SyllableImage.GetOffset()
 	}
+
 	//lyrics.AnimateManager.Add(l.GradientColorAnimate)
 
 	if l.IsBackground {
@@ -261,21 +314,56 @@ func (l *Line) ToNormal(lyrics *Lyrics) {
 			l.AlphaAnimate.Cancel()
 			l.AlphaAnimate = nil
 		}
-		l.AlphaAnimate = anim.NewTween(
+		l.AlphaAnimate = anim.NewKeyframeAnimation(
 			uuid.NewString(),
 			time.Duration(300)*time.Millisecond,
-			0,
-			1,
-			l.GetPosition().GetAlpha(),
-			0,
-			anim.EaseInOut,
-			func(value float64) {
-				l.GetPosition().SetAlpha(value)
+			0, 1, false,
+			[]anim.Keyframe{
+				{
+					Offset: 0,
+					Values: []float64{l.GetPosition().GetAlpha()},
+					Ease:   anim.EaseInOut,
+				},
+				{
+					Offset: 1,
+					Values: []float64{0},
+					Ease:   anim.EaseInOut,
+				},
+			},
+			func(value []float64) {
+				l.GetPosition().SetAlpha(value[0])
 			},
 			func() {
 				l.GetPosition().SetAlpha(0)
+				l.Position.SetTranslateY(0)
+				l.Position.SetScaleX(1)
+				l.Position.SetScaleY(1)
 			},
 		)
 		lyrics.AnimateManager.Add(l.AlphaAnimate)
+	}
+}
+
+func (l *Lyrics) DisposeAllAnimations() {
+	// 取消所有动画
+	for _, line := range l.Lines {
+		line.DisposeAllAnimations()
+		for _, bgLine := range line.BackgroundLines {
+			bgLine.DisposeAllAnimations()
+		}
+	}
+}
+
+func (l *Lyrics) Dispose() {
+	l.DisposeAllAnimations()
+	for _, line := range l.Lines {
+		line.Dispose()
+	}
+
+}
+
+func (l *Lyrics) Resize(w float64) {
+	for _, line := range l.Lines {
+		line.Resize(w)
 	}
 }

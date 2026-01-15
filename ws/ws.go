@@ -16,7 +16,9 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/disintegration/imaging"
 	"github.com/gorilla/websocket"
+	"github.com/hajimehoshi/ebiten/v2"
 )
 
 // ===========================
@@ -363,7 +365,7 @@ func Initws() {
 					log.Println(p.Data)
 					evbus.Bus.Publish("ws:setMusic", p.Data)
 				case "setLyric":
-					log.Println(p.Data)
+					//log.Println(p.Data)
 					/*d, err := ParseLyricsFromMap(p.Data["lines"].([]interface{}))
 					if err != nil {
 						log.Println(err)
@@ -396,7 +398,7 @@ func Initws() {
 						Scroll([]int{0}, game, 0)
 						game.mu.Unlock()
 					}*/
-					evbus.Bus.Publish("ws:setLyric", p.Data)
+					evbus.Bus.Publish("ws:setLyric", p.Data["lines"].([]interface{}))
 				case "progress":
 					//log.Println(p.Data)
 					// float64
@@ -409,6 +411,12 @@ func Initws() {
 					game.progress = time.Duration(progress) * time.Millisecond
 					game.mu.Unlock()*/
 
+					progress, ok := p.Data["progress"].(float64)
+					if !ok {
+						log.Println("MAIN: progress 不是 float64")
+						break
+					}
+					evbus.Bus.Publish("ws:progress", progress)
 				case "volume":
 					log.Println(p.Data)
 				case "setCover":
@@ -420,11 +428,16 @@ func Initws() {
 				//log.Printf("MAIN [Binary]: 类型=%s, 大小=%d bytes", p.Type, len(p.Data))
 
 				if p.Type == "SetCoverData" {
-					/*log.Println("   >>> 收到二进制封面数据 (SetCoverData)!")
+					log.Println("   >>> 收到二进制封面数据 (SetCoverData)!")
 					// 这里 p.Data 就是图片的 byte 数组 (png/jpg)
 					// 你可以将 p.Data 保存为文件，或者发送给前端
-					log.Println("   >>> 尝试解码...", len(p.Data))
+					/*log.Println("   >>> 尝试解码...", len(p.Data))
 					img, err := jpeg.Decode(bytes.NewReader(p.Data))
+					if err != nil {
+						log.Println("   >>> 解码失败:", err)
+						continue
+					}*/
+					img, err := imaging.Decode(bytes.NewReader(p.Data))
 					if err != nil {
 						log.Println("   >>> 解码失败:", err)
 						continue
@@ -435,11 +448,9 @@ func Initws() {
 					//对比度
 					blurred = imaging.AdjustContrast(blurred, -30)
 					blurred = imaging.AdjustSaturation(blurred, 10)
-					// 画到game.NowBg
-					game.mu.Lock()
 
-					game.nowBg = ebiten.NewImageFromImage(blurred)
-					game.mu.Unlock()*/
+					evbus.Bus.Publish("ws:cover", ebiten.NewImageFromImage(blurred))
+
 				}
 
 			// 5. 处理 V1 二进制消息

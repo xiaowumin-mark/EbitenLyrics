@@ -29,10 +29,11 @@ type LineSyllable struct {
 }
 
 type SyllableElement struct {
-	Text          string
-	Position      Position
-	SyllableImage *SyllableImage // 音节图像数据结构
-	NowOffset     float64        // 当前偏移位置（用于渐变计算）
+	Text               string
+	Position           Position
+	SyllableImage      *SyllableImage // 音节图像数据结构
+	BackgroundBlurText *TextShadow    // 背景模糊
+	NowOffset          float64        // 当前偏移位置（用于渐变计算）
 	//Offset        float64        // 偏移位置
 	Alpha     float64       // 当前透明度（用于渐变计算）
 	StartTime time.Duration // 开始时间
@@ -83,8 +84,9 @@ type Line struct {
 	// 动画控制器
 
 	ScrollAnimate        *anim.Tween
-	AlphaAnimate         *anim.Tween
+	AlphaAnimate         *anim.KeyframeAnimation
 	GradientColorAnimate *anim.Tween
+	ScaleAnimate         *anim.Tween
 }
 
 type LyricMeta struct {

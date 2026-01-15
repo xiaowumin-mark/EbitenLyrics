@@ -8,22 +8,33 @@ var Offsets [32]float
 var SampleCount int
 
 func Fragment(dstPos vec4, srcPos vec2, color vec4) vec4 {
-	pixel := Direction / TextureSize
+    pixel := Direction / TextureSize
+    var sum vec4
+    var totalWeight float = 0.0
+    
+    // 边界保护
+    minCoord := pixel * 0.5
+    maxCoord := vec2(1.0) - pixel * 0.5
+    
+    for i := 0; i < 32; i++ {
+        if i >= SampleCount {
+            break
+        }
+        offset := pixel * Offsets[i]
+        w := Weights[i]
 
-	var sum vec4
-	for i := 0; i < 32; i++ {
-		if i >= SampleCount {
-			break
-		}
-		offset := pixel * Offsets[i]
-		w := Weights[i]
-
-		if Offsets[i] == 0.0 {
-			sum += imageSrc0At(srcPos) * w
-		} else {
-			sum += imageSrc0At(srcPos + offset) * w
-			sum += imageSrc0At(srcPos - offset) * w
-		}
-	}
-	return sum
+        if Offsets[i] == 0.0 {
+            sum += imageSrc0At(srcPos) * w
+            totalWeight += w
+        } else {
+            posPlus := clamp(srcPos + offset, minCoord, maxCoord)
+            posMinus := clamp(srcPos - offset, minCoord, maxCoord)
+            
+            sum += imageSrc0At(posPlus) * w
+            sum += imageSrc0At(posMinus) * w
+            totalWeight += w * 2.0
+        }
+    }
+    
+    return sum / totalWeight
 }
