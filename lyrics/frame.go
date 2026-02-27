@@ -51,8 +51,7 @@ func createFrames(blocks []*SyllableElement, targetIndex int, lineStartTime, lin
 	// 3. 设定边界值
 	// TS: minOffset = -(word.width + word.padding * 2 + fadeWidth)
 	// 这里的 elWidth 应该对应 TS 的 width + padding*2
-	minOffset := -(elWidth + fadeWidth)
-
+	minOffset := -(elWidth + fadeWidth - 4)
 	clampOffset := func(x float64) float64 {
 		if x < minOffset {
 			return minOffset

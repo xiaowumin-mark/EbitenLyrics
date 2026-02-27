@@ -17,6 +17,10 @@ func (l *Lyrics) Scroll(index []int, notInit int) {
 		return
 	}
 
+	if notInit == 0 && len(index) == 0 {
+		index = []int{0}
+	}
+
 	renderIndex := make([]int, 0)
 	// 渲染now[0] 的上3句，下10句
 	for i := index[0] - 4; i <= index[0]+10; i++ {
@@ -201,7 +205,7 @@ func (l *Lyrics) Update(t time.Duration) {
 			)
 			l.AnimateManager.Add(line.ScaleAnimate)
 
-			line.LineAnimate(l)
+			line.LineAnimate(l, l.FD)
 
 		} else {
 			// 如果在nowindex中，则移出
@@ -366,4 +370,8 @@ func (l *Lyrics) Resize(w float64) {
 	for _, line := range l.Lines {
 		line.Resize(w)
 	}
+}
+
+func (l *Lyrics) GetRenderedindex() []int {
+	return l.renderIndex
 }

@@ -23,6 +23,9 @@ type Position struct {
 // ------------------------------------------------------
 
 func TransformToGeoM(p *Position) ebiten.GeoM {
+	if p == nil {
+		return ebiten.GeoM{}
+	}
 	m := ebiten.GeoM{}
 
 	// 1. 设置中心点：先将图像的中心点移到 (0,0)

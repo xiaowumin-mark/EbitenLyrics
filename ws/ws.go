@@ -335,7 +335,7 @@ func Initws() {
 	server := NewAMLLWebSocketServer()
 
 	// 启动服务器
-	server.Reopen("127.0.0.1:11445", messageChannel)
+	server.Reopen("0.0.0.0:11445", messageChannel)
 
 	termChan := make(chan os.Signal, 1)
 	signal.Notify(termChan, syscall.SIGINT, syscall.SIGTERM)

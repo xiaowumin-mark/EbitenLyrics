@@ -53,7 +53,7 @@ func (l *Line) Layout() {
 	al := text.AlignStart
 	if l.IsDuet {
 		al = text.AlignEnd
-		lineXTL = -l.Padding
+
 	}
 
 	var poss []Position
@@ -61,7 +61,7 @@ func (l *Line) Layout() {
 	poss, height = AutoLayoutSyllable(
 		ls,
 		*l.GetFace(true),
-		w-l.Padding,
+		w-l.Padding*2,
 		l.lineHeight,
 		1,
 		al,
@@ -236,7 +236,10 @@ func (l *Line) SetFont(font *text.GoTextFaceSource) {
 	}
 	l.GenerateTSImage()
 	l.Layout()
-	l.Image.Deallocate()
+	//l.Image.Deallocate()
+	if l.Image != nil {
+		l.Image.Deallocate()
+	}
 	l.Image = ebiten.NewImage(int(l.GetPosition().GetW()), int(l.GetPosition().GetH()))
 }
 
@@ -247,7 +250,9 @@ func (l *Line) SetFontSize(fontsize float64) {
 	}
 	l.GenerateTSImage()
 	l.Layout()
-	l.Image.Deallocate()
+	if l.Image != nil {
+		l.Image.Deallocate()
+	}
 	l.Image = ebiten.NewImage(int(l.GetPosition().GetW()), int(l.GetPosition().GetH()))
 }
 
@@ -520,7 +525,10 @@ func (l *Line) Resize(width float64) {
 	//l.Render()
 	//}
 	// 更改l.Image
-	l.Image.Deallocate()
+	//l.Image.Deallocate()
+	if l.Image != nil {
+		l.Image.Deallocate()
+	}
 	l.Image = ebiten.NewImage(int(l.GetPosition().GetW()), int(l.GetPosition().GetH()))
 
 	// bg
@@ -565,5 +573,16 @@ func (l *Line) DisposeAllAnimations() {
 			e.UpAnimate.Cancel()
 			e.UpAnimate = nil
 		}
+	}
+}
+
+func (l *Line) SetFD(fd float64) {
+	for _, e := range l.OuterSyllableElements {
+		e.SyllableImage.SetFd(fd)
+		e.NowOffset = e.SyllableImage.Offset
+	}
+	for _, line := range l.BackgroundLines {
+		line.SetFD(fd)
+
 	}
 }

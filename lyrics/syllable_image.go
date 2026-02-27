@@ -58,7 +58,10 @@ func CreateSyllableImage(syllable string, font text.Face, fd float64,
 }
 
 func CreateTextMask(syllable string, font text.Face, w, h float64) *ebiten.Image {
-
+	if syllable == "" || w <= 0 || h <= 0 {
+		w = 1
+		h = 1
+	}
 	// 生成文字蒙版
 	textMask := ebiten.NewImage(int(w), int(h))
 	textMask.Fill(color.Transparent)
@@ -247,6 +250,7 @@ func (s *SyllableImage) SetFd(fd float64) {
 		s.StartColor,
 		s.EndColor,
 	)
+
 }
 func (s *SyllableImage) GetText() string {
 	return s.Text

@@ -53,7 +53,7 @@ func (g *Game) OnEnter(params map[string]any) {
 		log.Fatal(err)
 	}
 	w, _ := ebiten.WindowSize()
-	l, err := lyrics.New(tt.LyricLines, float64(w), g.Font, g.fontsize)
+	l, err := lyrics.New(tt.LyricLines, float64(w), g.Font, g.fontsize, 1)
 	if err != nil {
 		log.Fatal(err)
 	}

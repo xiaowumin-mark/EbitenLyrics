@@ -112,6 +112,11 @@ type Lyrics struct {
 	renderIndex   []int
 	Margin        float64
 	HighlightTime time.Duration
+	FD            float64
 
 	AnimateManager *anim.Manager
+}
+
+func (l *Lyrics) GetNowLyrics() []int {
+	return l.nowLyrics
 }

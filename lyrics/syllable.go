@@ -9,7 +9,7 @@ import (
 )
 
 func NewSyllable(
-	text string,
+	t string,
 	startTime,
 	endTime time.Duration,
 	// SyllableImage
@@ -20,6 +20,7 @@ func NewSyllable(
 
 	needSptext bool,
 ) (*LineSyllable, error) {
+	var text = []rune(t)
 	var eles []*SyllableElement
 	if needSptext {
 
@@ -53,7 +54,7 @@ func NewSyllable(
 		}
 	} else {
 		syllableImage, err := CreateSyllableImage(
-			text,
+			t,
 			font,
 			fd,
 			startColor,
@@ -66,7 +67,7 @@ func NewSyllable(
 		po.OriginX = po.GetW() / 2
 		po.OriginY = po.GetH() * 6 / 5
 		eles = append(eles, &SyllableElement{
-			Text:          text,
+			Text:          t,
 			Position:      po,
 			SyllableImage: syllableImage,
 			NowOffset:     syllableImage.Offset,
@@ -76,7 +77,7 @@ func NewSyllable(
 		})
 	}
 	return &LineSyllable{
-		Syllable:  text,
+		Syllable:  t,
 		StartTime: startTime,
 		EndTime:   endTime,
 		//SyllableImage: syllableImage,
@@ -93,8 +94,9 @@ func (ls *LineSyllable) Draw(screen *ebiten.Image) {
 			// 画文本背景模糊
 			ele.BackgroundBlurText.Draw(
 				screen,
-				ele.Position.GetX()+ele.Position.GetTranslateX(),
-				ele.Position.GetY()+ele.Position.GetTranslateY(),
+				/*ele.Position.GetX()+ele.Position.GetTranslateX(),
+				ele.Position.GetY()+ele.Position.GetTranslateY(),*/
+				&ele.Position,
 			)
 
 		}

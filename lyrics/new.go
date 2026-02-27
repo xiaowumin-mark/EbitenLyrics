@@ -10,8 +10,9 @@ import (
 	"github.com/hajimehoshi/ebiten/v2/text/v2"
 )
 
-func New(ttmllines []ttml.LyricLine, screenW float64, f *text.GoTextFaceSource, fs float64) (*Lyrics, error) {
+func New(ttmllines []ttml.LyricLine, screenW float64, f *text.GoTextFaceSource, fs, fd float64) (*Lyrics, error) {
 	var lyrics Lyrics
+	lyrics.FD = fd
 	for _, line := range ttmllines {
 		l := NewLine(time.Duration(line.StartTime)*time.Millisecond, time.Duration(line.EndTime)*time.Millisecond, line.IsDuet, line.IsBG, line.TranslatedLyric, f, fs)
 		l.Position.SetW(screenW * 0.8)
@@ -19,7 +20,7 @@ func New(ttmllines []ttml.LyricLine, screenW float64, f *text.GoTextFaceSource, 
 		if line.IsDuet {
 			l.Position.SetX(screenW - l.Position.GetW())
 		}
-		err := CreateSyllable(line.Words, l)
+		err := CreateSyllable(line.Words, l, fd)
 		if err != nil {
 			return nil, err
 		}
@@ -31,7 +32,7 @@ func New(ttmllines []ttml.LyricLine, screenW float64, f *text.GoTextFaceSource, 
 			if line.IsDuet {
 				lbg.Position.SetX(screenW - lbg.Position.GetW())
 			}
-			err := CreateSyllable(bgline.Words, lbg)
+			err := CreateSyllable(bgline.Words, lbg, fd)
 			if err != nil {
 				return nil, err
 			}
@@ -45,7 +46,7 @@ func New(ttmllines []ttml.LyricLine, screenW float64, f *text.GoTextFaceSource, 
 	return &lyrics, nil
 }
 
-func CreateSyllable(ts []ttml.LyricWord, line *Line) error {
+func CreateSyllable(ts []ttml.LyricWord, line *Line, fd float64) error {
 	var syllables []*LineSyllable
 	var ap uint8 = 255
 	if line.IsBackground {
@@ -68,7 +69,7 @@ func CreateSyllable(ts []ttml.LyricWord, line *Line) error {
 				time.Duration(t.StartTime)*time.Millisecond,
 				time.Duration(t.EndTime)*time.Millisecond,
 				*line.GetFace(false),
-				1,
+				fd,
 				color.RGBA{255, 255, 255, ap},
 				color.RGBA{255, 255, 255, 60},
 				issp,
@@ -84,8 +85,8 @@ func CreateSyllable(ts []ttml.LyricWord, line *Line) error {
 	return nil
 }
 
-func (l *Line) LineAnimate(lyrics *Lyrics) {
-	l.FrameAnimate(lyrics)
+func (l *Line) LineAnimate(lyrics *Lyrics, fd float64) {
+	l.FrameAnimate(lyrics, fd)
 
 	for _, it := range l.BackgroundLines {
 		it.AlphaAnimate = anim.NewKeyframeAnimation(
@@ -126,15 +127,15 @@ func (l *Line) LineAnimate(lyrics *Lyrics) {
 		)
 		lyrics.AnimateManager.Add(it.AlphaAnimate)
 
-		it.FrameAnimate(lyrics)
+		it.FrameAnimate(lyrics, fd)
 	}
 }
 
-func (l *Line) FrameAnimate(lyrics *Lyrics) {
+func (l *Line) FrameAnimate(lyrics *Lyrics, fd float64) {
 	l.Status = Hot
 
 	for elei, e := range l.OuterSyllableElements {
-		kf := createFrames(l.OuterSyllableElements, elei, l.OuterSyllableElements[0].StartTime, l.OuterSyllableElements[len(l.OuterSyllableElements)-1].EndTime, 1)
+		kf := createFrames(l.OuterSyllableElements, elei, l.OuterSyllableElements[0].StartTime, l.OuterSyllableElements[len(l.OuterSyllableElements)-1].EndTime, fd)
 		if e.Animate != nil {
 			e.Animate.Cancel()
 			e.Animate = nil
@@ -184,8 +185,8 @@ func (l *Line) FrameAnimate(lyrics *Lyrics) {
 					float64(duration.Milliseconds()),
 					800,
 					3000,
-					2,
-					10,
+					6,
+					12,
 				)
 
 				hlap := anim.MapRange(
@@ -193,7 +194,7 @@ func (l *Line) FrameAnimate(lyrics *Lyrics) {
 					800,
 					3000,
 					0.1,
-					0.9,
+					1,
 				)
 
 				if ele.BackgroundBlurText == nil {
@@ -206,6 +207,7 @@ func (l *Line) FrameAnimate(lyrics *Lyrics) {
 					uuid.NewString(),
 					duration+time.Duration(200)*time.Millisecond,
 					wordEle[0].StartTime-lyrics.Position+duration/time.Duration(len(wordEle))*time.Duration(nu)/2,
+					//wordEle[0].StartTime-lyrics.Position+charDu,
 					1,
 					true,
 					[]anim.Keyframe{
@@ -254,7 +256,7 @@ func (l *Line) FrameAnimate(lyrics *Lyrics) {
 					wordEle[0].StartTime-lyrics.Position,
 					1,
 					ele.GetPosition().GetTranslateY(),
-					-l.fontsize*0.1,
+					-l.fontsize*0.07,
 					anim.EaseOut,
 					func(value float64) {
 						//ele.TransformY = value
@@ -276,7 +278,7 @@ func (l *Line) FrameAnimate(lyrics *Lyrics) {
 					ele.StartTime-lyrics.Position,
 					1,
 					ele.GetPosition().GetTranslateY(),
-					-l.fontsize*0.1,
+					-l.fontsize*0.07,
 					anim.EaseOut,
 					func(value float64) {
 						//ele.TransformY = value
@@ -289,6 +291,29 @@ func (l *Line) FrameAnimate(lyrics *Lyrics) {
 			}
 		}
 	}
+	/*for _, ele := range l.OuterSyllableElements {
+		if ele.UpAnimate != nil {
+			ele.UpAnimate.Cancel()
+			ele.UpAnimate = nil
+		}
+		ele.UpAnimate = anim.NewTween(
+			uuid.NewString(),
+			ele.EndTime-ele.StartTime+700*time.Millisecond,
+			//time.Duration(e.Word.StartTime-line.Line.StartTime)*time.Millisecond,
+			ele.StartTime-lyrics.Position,
+			1,
+			ele.GetPosition().GetTranslateY(),
+			-l.fontsize*0.07,
+			anim.EaseOut,
+			func(value float64) {
+				//ele.TransformY = value
+				ele.GetPosition().SetTranslateY(value)
+			},
+			func() {
+			},
+		)
+		lyrics.AnimateManager.Add(ele.UpAnimate)
+	}*/
 
 }
 

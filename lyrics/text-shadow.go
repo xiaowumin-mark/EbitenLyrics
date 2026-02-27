@@ -47,7 +47,7 @@ func NewTextShadow(texts string, textFace *text.GoTextFaceSource, size float64) 
 	}
 }
 
-func (ts *TextShadow) Draw(screen *ebiten.Image, X, Y float64) {
+func (ts *TextShadow) Draw(screen *ebiten.Image, p *Position) {
 	if ts.OriginImage == nil {
 		ts.OriginImage = ebiten.NewImage(int(ts.Width), int(ts.Height))
 		op := &text.DrawOptions{}
@@ -62,11 +62,15 @@ func (ts *TextShadow) Draw(screen *ebiten.Image, X, Y float64) {
 		ts.Image = filters.BlurImageShader(ts.OriginImage, ts.Blur)
 		ts.LastBlur = ts.Blur
 	}
-
 	op := &ebiten.DrawImageOptions{}
-	op.GeoM.Translate(X-ts.Margin, Y-ts.Margin)
+	//op.GeoM.Translate(X-ts.Margin, Y-ts.Margin)
+	opt := *p
+	opt.SetX(opt.GetX() - ts.Margin - 2)
+	opt.SetY(opt.GetY() - ts.Margin - 2)
+	op.GeoM = TransformToGeoM(&opt)
 	op.ColorScale.ScaleAlpha(float32(ts.Alpha))
 	op.Filter = ebiten.FilterLinear
+	op.Blend = ebiten.BlendLighter
 	screen.DrawImage(
 		ts.Image,
 		op,

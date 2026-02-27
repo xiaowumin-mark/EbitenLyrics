@@ -2,6 +2,7 @@ package pages
 
 import (
 	"EbitenLyrics/anim"
+	LyricsComponent "EbitenLyrics/comps/lyrics"
 	"EbitenLyrics/evbus"
 	"EbitenLyrics/lyrics"
 	"EbitenLyrics/router"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/hajimehoshi/ebiten/v2/ebitenutil"
+	"github.com/hajimehoshi/ebiten/v2/inpututil"
 	"github.com/hajimehoshi/ebiten/v2/text/v2"
 )
 
@@ -22,14 +24,22 @@ type Home struct {
 	LyricsImageAnim *anim.Tween
 	AnimateManager  *anim.Manager
 
-	LyricsControl *lyrics.Lyrics
-
+	LyricsControl *LyricsComponent.LyricsComponent
 	Cover         *ebiten.Image
 	CoverPosition lyrics.Position
+
+	FontSize float64
+	FD       float64
 }
 
 func (h *Home) OnCreate() {
 	log.Println("Home OnCreate")
+	ww, hh := ebiten.WindowSize()
+	h.FontSize = 50
+	h.FD = 0.5
+	h.LyricsControl = LyricsComponent.NewLyricsComponent(h.AnimateManager, h.Font, float64(ww), float64(hh), h.FontSize, h.FD)
+	h.LyricsControl.Init()
+
 }
 func (h *Home) OnEnter(params map[string]any) {
 	log.Println("Home OnEnter", params)
@@ -46,27 +56,11 @@ func (h *Home) OnEnter(params map[string]any) {
 			log.Fatalln(err)
 		}
 
-		if h.LyricsControl != nil {
-			h.LyricsControl.Dispose()
-
-		}
-		ww, _ := ebiten.WindowSize()
-		h.LyricsControl, err = lyrics.New(d, float64(ww), h.Font, 50)
-		if err != nil {
-			log.Fatalln(err)
-		}
-		h.LyricsControl.AnimateManager = h.AnimateManager
-		h.LyricsControl.HighlightTime = time.Millisecond * 800
-		if len(h.LyricsControl.Lines) > 0 {
-			h.LyricsControl.Scroll([]int{0}, 0)
-		}
+		h.LyricsControl.SetLyrics(d)
 
 	})
 	evbus.Bus.Subscribe("ws:progress", func(value float64) {
-		if h.LyricsControl != nil {
-			h.LyricsControl.Position = time.Duration(value) * time.Millisecond
-			h.LyricsControl.Update(h.LyricsControl.Position)
-		}
+		h.LyricsControl.Update(time.Duration(value) * time.Millisecond)
 	})
 	evbus.Bus.Subscribe("ws:cover", func(img *ebiten.Image) {
 		h.Cover = img
@@ -99,14 +93,33 @@ func (h *Home) OnDestroy() {
 
 func (h *Home) Update() error {
 
-	/*h.CoverPosition.Rotate += 0.5
+	h.CoverPosition.Rotate += 0.5
 	if h.CoverPosition.Rotate > 360 {
 		h.CoverPosition.Rotate = 0
 	}
 
-	if ebiten.IsKeyPressed(ebiten.KeySpace) {
-		router.Go("game", nil)
-	}*/
+	if inpututil.IsKeyJustPressed(ebiten.KeyUp) {
+		h.FontSize += 4.0
+		h.LyricsControl.SetFontSize(h.FontSize)
+		h.LyricsControl.SetFD(h.FD)
+		log.Println("FontSize:", h.FontSize)
+	}
+	if inpututil.IsKeyJustPressed(ebiten.KeyDown) {
+		h.FontSize -= 4.0
+		h.LyricsControl.SetFontSize(h.FontSize)
+		h.LyricsControl.SetFD(h.FD)
+		log.Println("FontSize:", h.FontSize)
+	}
+	if inpututil.IsKeyJustPressed(ebiten.KeyRight) {
+		h.FD += 0.1
+		h.LyricsControl.SetFD(h.FD)
+		log.Println("FD:", h.FD)
+	}
+	if inpututil.IsKeyJustPressed(ebiten.KeyLeft) {
+		h.FD -= 0.1
+		h.LyricsControl.SetFD(h.FD)
+		log.Println("FD:", h.FD)
+	}
 
 	return nil
 }
@@ -119,10 +132,7 @@ func (h *Home) Draw(screen *ebiten.Image) {
 		op.GeoM = lyrics.TransformToGeoM(&h.CoverPosition)
 		screen.DrawImage(h.Cover, op)
 	}
-	if h.LyricsControl != nil {
-
-		h.LyricsControl.Draw(screen)
-	}
+	h.LyricsControl.Draw(screen, nil)
 
 }
 
@@ -130,7 +140,7 @@ func (h *Home) OnResize(w, he int, isFirst bool) {
 	log.Println("Home OnResize", w, he, isFirst)
 	if !isFirst {
 		if h.LyricsControl != nil {
-			h.LyricsControl.Resize(float64(w))
+			h.LyricsControl.Resize(float64(w), float64(he))
 		}
 
 		h.CoverPosition.TranslateX = (float64(w) - h.CoverPosition.W) / 2
