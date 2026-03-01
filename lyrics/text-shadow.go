@@ -2,7 +2,6 @@ package lyrics
 
 import (
 	"EbitenLyrics/filters"
-	_ "EbitenLyrics/filters"
 	"image/color"
 
 	"github.com/hajimehoshi/ebiten/v2"
@@ -17,15 +16,14 @@ type TextShadow struct {
 	Text            string
 	TextFace        *text.GoTextFaceSource
 	Size            float64
-	OriginImage     *ebiten.Image // 源图片
-	Image           *ebiten.Image // 模糊图片
+	OriginImage     *ebiten.Image
+	Image           *ebiten.Image
 	TWidth, THeight float64
 	Width, Height   float64
 	Alpha           float64
 }
 
 func NewTextShadow(texts string, textFace *text.GoTextFaceSource, size float64) *TextShadow {
-	// 计算文字的宽高
 	tw, th := text.Measure(texts, &text.GoTextFace{
 		Source: textFace,
 		Size:   size,
@@ -43,51 +41,91 @@ func NewTextShadow(texts string, textFace *text.GoTextFaceSource, size float64) 
 		Height:   th + 50*2,
 		Size:     size,
 		Alpha:    0,
-		LastBlur: 0,
+		LastBlur: -1,
 	}
 }
 
-func (ts *TextShadow) Draw(screen *ebiten.Image, p *Position) {
-	if ts.OriginImage == nil {
-		ts.OriginImage = ebiten.NewImage(int(ts.Width), int(ts.Height))
-		op := &text.DrawOptions{}
-		op.GeoM.Translate(ts.Margin, ts.Margin)
-		op.ColorScale.ScaleWithColor(color.White)
-		text.Draw(ts.OriginImage, ts.Text, &text.GoTextFace{
-			Source: ts.TextFace,
-			Size:   ts.Size,
-		}, op)
+func (ts *TextShadow) ensureOriginImage() bool {
+	if ts == nil || ts.TextFace == nil || ts.Size <= 0 {
+		return false
 	}
-	if ts.Blur != ts.LastBlur {
-		ts.Image = filters.BlurImageShader(ts.OriginImage, ts.Blur)
+	if ts.OriginImage != nil {
+		return true
+	}
+
+	ts.OriginImage = ebiten.NewImage(safeImageLength(ts.Width), safeImageLength(ts.Height))
+	op := &text.DrawOptions{}
+	op.GeoM.Translate(ts.Margin, ts.Margin)
+	op.ColorScale.ScaleWithColor(color.White)
+	text.Draw(ts.OriginImage, ts.Text, &text.GoTextFace{
+		Source: ts.TextFace,
+		Size:   ts.Size,
+	}, op)
+
+	return true
+}
+
+func (ts *TextShadow) updateImage() {
+	if !ts.ensureOriginImage() {
+		return
+	}
+
+	if ts.Blur == ts.LastBlur && ts.Image != nil {
+		return
+	}
+
+	if ts.Blur <= 0 {
+		if ts.Image != nil && ts.Image != ts.OriginImage {
+			ts.Image.Deallocate()
+		}
+		ts.Image = ts.OriginImage
 		ts.LastBlur = ts.Blur
+		return
 	}
-	op := &ebiten.DrawImageOptions{}
-	//op.GeoM.Translate(X-ts.Margin, Y-ts.Margin)
-	opt := *p
+
+	blurred := filters.BlurImageShader(ts.OriginImage, ts.Blur)
+	if ts.Image != nil && ts.Image != ts.OriginImage {
+		ts.Image.Deallocate()
+	}
+	ts.Image = blurred
+	ts.LastBlur = ts.Blur
+}
+
+func (ts *TextShadow) Draw(screen *ebiten.Image, p *Position) {
+	if ts == nil || screen == nil {
+		return
+	}
+	ts.updateImage()
+	if ts.Image == nil {
+		return
+	}
+
+	opt := NewPosition(0, 0, 0, 0)
+	if p != nil {
+		opt = *p
+	}
 	opt.SetX(opt.GetX() - ts.Margin - 2)
 	opt.SetY(opt.GetY() - ts.Margin - 2)
+
+	op := &ebiten.DrawImageOptions{}
 	op.GeoM = TransformToGeoM(&opt)
 	op.ColorScale.ScaleAlpha(float32(ts.Alpha))
 	op.Filter = ebiten.FilterLinear
 	op.Blend = ebiten.BlendLighter
-	screen.DrawImage(
-		ts.Image,
-		op,
-	)
-
+	screen.DrawImage(ts.Image, op)
 }
 
 func (ts *TextShadow) Dispose() {
-	//ts.OriginImage.Deallocate()
+	if ts == nil {
+		return
+	}
+	if ts.Image != nil && ts.Image != ts.OriginImage {
+		ts.Image.Deallocate()
+	}
 	if ts.OriginImage != nil {
 		ts.OriginImage.Deallocate()
 	}
-
-	//ts.Image.Deallocate()
-	if ts.Image != nil {
-		ts.Image.Deallocate()
-	}
 	ts.OriginImage = nil
 	ts.Image = nil
+	ts.LastBlur = -1
 }

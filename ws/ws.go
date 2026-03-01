@@ -18,7 +18,6 @@ import (
 
 	"github.com/disintegration/imaging"
 	"github.com/gorilla/websocket"
-	"github.com/hajimehoshi/ebiten/v2"
 )
 
 // ===========================
@@ -354,7 +353,7 @@ func Initws() {
 
 			// 2. 处理 V2 指令 (Command)
 			case Command:
-				log.Printf("MAIN [V2-Command]:", p.Command)
+				log.Printf("MAIN [V2-Command]: %s", p.Command)
 
 			// 3. 处理 V2 状态更新 (StateUpdate)
 			case StateUpdate:
@@ -398,7 +397,12 @@ func Initws() {
 						Scroll([]int{0}, game, 0)
 						game.mu.Unlock()
 					}*/
-					evbus.Bus.Publish("ws:setLyric", p.Data["lines"].([]interface{}))
+					lines, ok := p.Data["lines"].([]interface{})
+					if !ok {
+						log.Printf("MAIN: lines has unexpected type %T", p.Data["lines"])
+						break
+					}
+					evbus.Bus.Publish("ws:setLyric", lines)
 				case "progress":
 					//log.Println(p.Data)
 					// float64
@@ -413,14 +417,20 @@ func Initws() {
 
 					progress, ok := p.Data["progress"].(float64)
 					if !ok {
-						log.Println("MAIN: progress 不是 float64")
-						break
+						if v, ok := p.Data["progress"].(int); ok {
+							progress = float64(v)
+						} else {
+							log.Printf("MAIN: progress has unexpected type %T", p.Data["progress"])
+							break
+						}
 					}
 					evbus.Bus.Publish("ws:progress", progress)
 				case "volume":
 					log.Println(p.Data)
 				case "setCover":
 					log.Println(p.Data)
+				case "setFontConfig", "setFont":
+					evbus.Bus.Publish("ws:fontConfig", p.Data)
 				}
 
 				// --- 情况 B: 二进制封面 (通常是直接的图片数据) ---
@@ -449,7 +459,7 @@ func Initws() {
 					blurred = imaging.AdjustContrast(blurred, -30)
 					blurred = imaging.AdjustSaturation(blurred, 10)
 
-					evbus.Bus.Publish("ws:cover", ebiten.NewImageFromImage(blurred))
+					evbus.Bus.Publish("ws:cover", blurred)
 
 				}
 

@@ -1,0 +1,13 @@
+﻿{
+  "font": {
+    "families": [
+      "SF Pro",
+      "Microsoft YaHei UI",
+      "Noto Sans CJK SC",
+      "Source Han Sans SC"
+    ],
+    "weight": 500,
+    "italic": false,
+    "requireCJK": true
+  }
+}

@@ -9,7 +9,9 @@ func (s *SyllableElement) SetPosition(pos Position)    { s.Position = pos }
 func (s *SyllableElement) GetText() string             { return s.Text }
 func (s *SyllableElement) SetText(text string) {
 	s.Text = text
-	s.SyllableImage.SetText(s.Text)
+	if s.SyllableImage != nil {
+		s.SyllableImage.SetText(s.Text)
+	}
 }
 func (s *SyllableElement) GetSyllableImage() *SyllableImage {
 	return s.SyllableImage

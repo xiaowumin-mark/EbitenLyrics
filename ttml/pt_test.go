@@ -2,31 +2,34 @@ package ttml
 
 import (
 	"encoding/json"
-	"io/ioutil"
 	"os"
+	"path/filepath"
 	"testing"
 )
 
 func TestPT(t *testing.T) {
-	// 读取Bejeweled.ttml
-	file, err := os.Open("../Bejeweled.ttml")
-	if err != nil {
-		t.Error(err)
+	fixture := filepath.Join("..", "Bejeweled.ttml")
+	if _, err := os.Stat(fixture); err != nil {
+		t.Skipf("fixture not found: %s", fixture)
 	}
-	data, err := ioutil.ReadAll(file)
+
+	data, err := os.ReadFile(fixture)
 	if err != nil {
-		t.Error(err)
+		t.Fatalf("read fixture failed: %v", err)
 	}
-	t.Log(string(data))
+
 	tt, err := ParseTTML(string(data))
 	if err != nil {
-		t.Error(err)
+		t.Fatalf("parse TTML failed: %v", err)
 	}
-	// 转换为json
+
 	jsonData, err := json.Marshal(tt)
 	if err != nil {
-		t.Error(err)
+		t.Fatalf("marshal result failed: %v", err)
 	}
-	// 保存
-	err = ioutil.WriteFile("../Bejeweled.json", jsonData, 0644)
+
+	outPath := filepath.Join(t.TempDir(), "Bejeweled.json")
+	if err := os.WriteFile(outPath, jsonData, 0o644); err != nil {
+		t.Fatalf("write output failed: %v", err)
+	}
 }

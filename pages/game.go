@@ -6,7 +6,6 @@ import (
 	"EbitenLyrics/router"
 	"EbitenLyrics/ttml"
 	"fmt"
-	"io/ioutil"
 	"log"
 	"os"
 	"time"
@@ -17,11 +16,11 @@ import (
 )
 
 type Game struct {
-	router.BaseScene // 嵌入并获得默认实现
-	AnimateManager   *anim.Manager
-	Font             *text.GoTextFaceSource
-	sy               *lyrics.LineSyllable
-	fontsize         float64
+	router.BaseScene
+	AnimateManager *anim.Manager
+	Font           *text.GoTextFaceSource
+	sy             *lyrics.LineSyllable
+	fontsize       float64
 
 	line *lyrics.Line
 
@@ -35,72 +34,75 @@ type Game struct {
 	tim time.Duration
 }
 
+func (g *Game) loadDemoTTML() (ttml.TTMLLyric, error) {
+	candidates := []string{}
+	if fromEnv := os.Getenv("EBITENLYRICS_DEMO_TTML"); fromEnv != "" {
+		candidates = append(candidates, fromEnv)
+	}
+	candidates = append(candidates,
+		"test-data/Opalite.ttml",
+		"test-data/Bejeweled.ttml",
+	)
+
+	for _, filePath := range candidates {
+		data, err := os.ReadFile(filePath)
+		if err != nil {
+			continue
+		}
+		parsed, err := ttml.ParseTTML(string(data))
+		if err != nil {
+			continue
+		}
+		return parsed, nil
+	}
+	return ttml.TTMLLyric{}, fmt.Errorf("no demo ttml found, tried: %v", candidates)
+}
+
 func (g *Game) OnEnter(params map[string]any) {
 	log.Println("Game OnEnter", params)
 	g.fontsize = 48.0
+	g.tim = 0
 
-	// 读取Bejeweled.ttml
-	file, err := os.Open("E:\\projects\\visual-lyric\\music\\Opalite.ttml")
+	tt, err := g.loadDemoTTML()
 	if err != nil {
-		log.Fatal(err)
+		log.Printf("load demo ttml failed: %v", err)
+		g.lyric = nil
+		return
 	}
-	data, err := ioutil.ReadAll(file)
-	if err != nil {
-		log.Fatal(err)
-	}
-	tt, err := ttml.ParseTTML(string(data))
-	if err != nil {
-		log.Fatal(err)
-	}
+
 	w, _ := ebiten.WindowSize()
 	l, err := lyrics.New(tt.LyricLines, float64(w), g.Font, g.fontsize, 1)
 	if err != nil {
-		log.Fatal(err)
+		log.Printf("init lyric failed: %v", err)
+		g.lyric = nil
+		return
 	}
 	g.lyric = l
 	g.lyric.AnimateManager = g.AnimateManager
 	g.lyric.HighlightTime = time.Millisecond * 1000
-
 }
 
-func (g *Game) OnLeave() {
+func (g *Game) OnLeave() {}
 
-}
 func (g *Game) Update() error {
-
 	if ebiten.IsKeyPressed(ebiten.KeyEscape) {
 		router.Go("home", nil)
+	}
+	if g.lyric == nil {
+		return nil
 	}
 
 	g.tim += time.Second / time.Duration(ebiten.TPS())
 	g.lyric.Update(g.tim)
-
-	//_, wy := ebiten.Wheel()
-	/*for _, e := range g.line.GetSyllables() {
-		for _, s := range e.Elements {
-			s.SetNowOffset(s.GetNowOffset() + wy*5)
-		}
-	}
-	if inpututil.IsMouseButtonJustPressed(ebiten.MouseButton(ebiten.MouseButtonLeft)) {
-		g.line.Dispose()
-	}
-	if inpututil.IsMouseButtonJustPressed(ebiten.MouseButton(ebiten.MouseButtonRight)) {
-		g.line.Render()
-	}
-	if inpututil.IsKeyJustPressed(ebiten.KeyUp) {
-		g.fontsize += 4.0
-		g.line.SetFontSize(g.fontsize)
-	}
-	if inpututil.IsKeyJustPressed(ebiten.KeyDown) {
-		g.fontsize -= 4.0
-		g.line.SetFontSize(g.fontsize)
-	}*/
 	return nil
 }
 
 func (g *Game) Draw(screen *ebiten.Image) {
-	g.lyric.Draw(screen)
-	//ebitenutil.DebugPrint(screen, fmt.Sprint(g.tim.Seconds()))
+	if g.lyric != nil {
+		g.lyric.Draw(screen)
+	} else {
+		ebitenutil.DebugPrint(screen, "No demo TTML found (set EBITENLYRICS_DEMO_TTML)")
+	}
 	msg := fmt.Sprintf("TPS: %0.2f\nFPS: %0.2f", ebiten.ActualTPS(), ebiten.ActualFPS())
 	ebitenutil.DebugPrint(screen, msg)
 }

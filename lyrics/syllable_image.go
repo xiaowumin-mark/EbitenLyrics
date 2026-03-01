@@ -1,7 +1,9 @@
 package lyrics
 
 import (
+	"errors"
 	"image/color"
+	"math"
 
 	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/hajimehoshi/ebiten/v2/text/v2"
@@ -18,30 +20,36 @@ type SyllableImage struct {
 	Fd            float64
 	Text          string
 	Font          *text.Face
-	tempImage     *ebiten.Image // 【新增】用于合成的缓存图像
+	tempImage     *ebiten.Image
 }
 
-// 实现创建音节图像
-func CreateSyllableImage(syllable string, font text.Face, fd float64,
+func CreateSyllableImage(
+	syllable string,
+	font text.Face,
+	fd float64,
 	startColor, endColor color.RGBA,
 ) (*SyllableImage, error) {
-	// 获取音节图像的宽高
-	tw, th := text.Measure(
-		syllable,
-		font,
-		1.0,
-	)
+	if font == nil {
+		return nil, errors.New("font is nil")
+	}
 
-	// 生成文字蒙版
+	tw, th := text.Measure(syllable, font, 1.0)
+	if tw <= 0 {
+		tw = 1
+	}
+	if th <= 0 {
+		th = 1
+	}
+
 	textMask := CreateTextMask(syllable, font, tw, th)
-	// 生成渐变图像
 	gradientImage, offset := CreateGradientImage(
-		int(tw),
-		int(th),
+		safeImageLength(tw),
+		safeImageLength(th),
 		fd,
 		startColor,
 		endColor,
 	)
+
 	return &SyllableImage{
 		TextMask:      textMask,
 		GradientImage: gradientImage,
@@ -53,47 +61,55 @@ func CreateSyllableImage(syllable string, font text.Face, fd float64,
 		Fd:            fd,
 		Font:          &font,
 		Text:          syllable,
-		tempImage:     ebiten.NewImage(int(tw), int(th)),
+		tempImage:     ebiten.NewImage(safeImageLength(tw), safeImageLength(th)),
 	}, nil
 }
 
 func CreateTextMask(syllable string, font text.Face, w, h float64) *ebiten.Image {
-	if syllable == "" || w <= 0 || h <= 0 {
-		w = 1
-		h = 1
+	if syllable == "" {
+		syllable = " "
 	}
-	// 生成文字蒙版
-	textMask := ebiten.NewImage(int(w), int(h))
+	iw := safeImageLength(w)
+	ih := safeImageLength(h)
+
+	textMask := ebiten.NewImage(iw, ih)
 	textMask.Fill(color.Transparent)
+
 	opts := &text.DrawOptions{}
 	opts.ColorScale.ScaleWithColor(color.White)
-	text.Draw(
-		textMask,
-		syllable,
-		font,
-		opts,
-	)
+	text.Draw(textMask, syllable, font, opts)
+
 	return textMask
 }
 
 func CreateGradientImage(width, height int, fd float64, startColor, endColor color.RGBA) (*ebiten.Image, float64) {
+	if width < 1 {
+		width = 1
+	}
+	if height < 1 {
+		height = 1
+	}
 
-	// 生成渐变图像
 	from, to, gradient, offset := generateBackgroundFadeStyle(
 		float64(width),
 		float64(height),
 		fd,
 	)
-	gradientWidth := float64(width) * gradient
-	gradientImage := ebiten.NewImage(int(gradientWidth), 1)
+	gradientWidth := math.Max(1, float64(width)*gradient)
+	gradientImage := ebiten.NewImage(safeImageLength(gradientWidth), 1)
 
 	startPixel := gradientWidth * from
 	endPixel := gradientWidth * to
+	denominator := endPixel - startPixel
+	if math.Abs(denominator) < 1e-6 {
+		denominator = 1
+	}
 
-	for x := 0; x < int(gradientWidth); x++ {
+	for x := 0; x < safeImageLength(gradientWidth); x++ {
 		var c color.RGBA
-		if float64(x) < startPixel {
-			//c = startRGBA
+		xf := float64(x)
+		switch {
+		case xf < startPixel:
 			a := float64(startColor.A) / 255.0
 			c = color.RGBA{
 				R: uint8(float64(startColor.R) * a),
@@ -101,7 +117,7 @@ func CreateGradientImage(width, height int, fd float64, startColor, endColor col
 				B: uint8(float64(startColor.B) * a),
 				A: startColor.A,
 			}
-		} else if float64(x) > endPixel {
+		case xf > endPixel:
 			a := float64(endColor.A) / 255.0
 			c = color.RGBA{
 				R: uint8(float64(endColor.R) * a),
@@ -109,8 +125,8 @@ func CreateGradientImage(width, height int, fd float64, startColor, endColor col
 				B: uint8(float64(endColor.B) * a),
 				A: endColor.A,
 			}
-		} else {
-			t := (float64(x) - startPixel) / (endPixel - startPixel)
+		default:
+			t := (xf - startPixel) / denominator
 			a := uint8(float64(startColor.A) + (float64(endColor.A)-float64(startColor.A))*t)
 			r := uint8((float64(startColor.R) + (float64(endColor.R)-float64(startColor.R))*t) * (float64(a) / 255.0))
 			g := uint8((float64(startColor.G) + (float64(endColor.G)-float64(startColor.G))*t) * (float64(a) / 255.0))
@@ -119,22 +135,30 @@ func CreateGradientImage(width, height int, fd float64, startColor, endColor col
 		}
 		gradientImage.Set(x, 0, c)
 	}
+
 	return gradientImage, offset
 }
 
 func (s *SyllableImage) Draw(img *ebiten.Image, offset float64, alpha float64, pos *Position) {
-	if s.TextMask == nil || s.GradientImage == nil {
+	// Guard against transient resource disposal during hot-reload paths.
+	defer func() {
+		_ = recover()
+	}()
+
+	if s == nil || img == nil || pos == nil || s.TextMask == nil || s.GradientImage == nil {
 		return
 	}
-	s.tempImage.Clear()
-	opts := &ebiten.DrawImageOptions{}
-	s.tempImage.DrawImage(s.TextMask, opts)
+	if s.tempImage == nil {
+		s.tempImage = ebiten.NewImage(safeImageLength(s.Width), safeImageLength(s.Height))
+	}
 
-	// 绘制渐变图像
+	s.tempImage.Clear()
+	s.tempImage.DrawImage(s.TextMask, &ebiten.DrawImageOptions{})
+
 	op := &ebiten.DrawImageOptions{}
 	op.Blend = ebiten.BlendSourceIn
 	op.GeoM.Translate(offset, 0)
-	op.GeoM.Scale(1, s.Height) // 高度缩放到和文字蒙版一样高
+	op.GeoM.Scale(1, math.Max(1, s.Height))
 	op.ColorScale.ScaleAlpha(float32(alpha))
 	s.tempImage.DrawImage(s.GradientImage, op)
 
@@ -142,137 +166,168 @@ func (s *SyllableImage) Draw(img *ebiten.Image, offset float64, alpha float64, p
 	finalop.Filter = ebiten.FilterLinear
 	finalop.GeoM = TransformToGeoM(pos)
 	img.DrawImage(s.tempImage, finalop)
-
 }
 
 func (s *SyllableImage) Dispose() {
-	s.tempImage.Deallocate()
-	s.GradientImage.Deallocate()
-	s.TextMask.Deallocate()
+	if s == nil {
+		return
+	}
+	if s.tempImage != nil {
+		s.tempImage.Deallocate()
+		s.tempImage = nil
+	}
+	if s.GradientImage != nil {
+		s.GradientImage.Deallocate()
+		s.GradientImage = nil
+	}
+	if s.TextMask != nil {
+		s.TextMask.Deallocate()
+		s.TextMask = nil
+	}
 }
 
 func (s *SyllableImage) GetWidth() float64 {
 	return s.Width
 }
+
 func (s *SyllableImage) GetHeight() float64 {
 	return s.Height
 }
+
 func (s *SyllableImage) GetOffset() float64 {
 	return s.Offset
 }
 
 func generateBackgroundFadeStyle(elementWidth, elementHeight, fadeRatio float64) (float64, float64, float64, float64) {
+	if elementWidth <= 0 {
+		elementWidth = 1
+	}
+	if elementHeight <= 0 {
+		elementHeight = 1
+	}
+	if fadeRatio <= 0 {
+		fadeRatio = 0.0001
+	}
 
 	fadeWidth := elementHeight * fadeRatio
 	widthRatio := fadeWidth / elementWidth
 
 	totalAspect := 2 + widthRatio
+	if totalAspect <= 0 {
+		totalAspect = 2
+	}
 	widthInTotal := widthRatio / totalAspect
 	leftPos := (1 - widthInTotal) / 2
 
 	from := leftPos
-	to := (leftPos + widthInTotal)
-
+	to := leftPos + widthInTotal
 	totalPxWidth := elementWidth + fadeWidth
 	return from, to, totalAspect, -totalPxWidth
 }
 
-// 重绘函数
 func (s *SyllableImage) Redraw() {
-	/*s.tempImage.Deallocate()
-	s.GradientImage.Deallocate()
-	s.TextMask.Deallocate()*/
+	if s == nil || s.Font == nil || *s.Font == nil {
+		return
+	}
+
 	s.Dispose()
-	// 重新创建文字蒙版和渐变图像
-	// 计算文字宽高
-	tw, th := text.Measure(
-		s.Text,
-		*s.Font,
-		1.0,
-	)
-	// 生成文字蒙版
+	tw, th := text.Measure(s.Text, *s.Font, 1.0)
+	if tw <= 0 {
+		tw = 1
+	}
+	if th <= 0 {
+		th = 1
+	}
+
 	s.TextMask = CreateTextMask(s.Text, *s.Font, tw, th)
-	// 生成渐变图像
 	s.GradientImage, s.Offset = CreateGradientImage(
-		int(tw),
-		int(th),
+		safeImageLength(tw),
+		safeImageLength(th),
 		s.Fd,
 		s.StartColor,
 		s.EndColor,
 	)
 	s.Width = tw
 	s.Height = th
-	s.tempImage = ebiten.NewImage(int(tw), int(th))
+	s.tempImage = ebiten.NewImage(safeImageLength(tw), safeImageLength(th))
 }
 
-// 将结构体中的属性写成函数 并重绘
 func (s *SyllableImage) SetText(t string) {
 	s.Text = t
 	s.Redraw()
 }
+
 func (s *SyllableImage) SetFont(f text.Face) {
+	if s == nil {
+		return
+	}
 	s.Font = &f
 	s.Redraw()
-
 }
+
+func (s *SyllableImage) rebuildGradient() {
+	if s == nil {
+		return
+	}
+	if s.GradientImage != nil {
+		s.GradientImage.Deallocate()
+		s.GradientImage = nil
+	}
+	s.GradientImage, s.Offset = CreateGradientImage(
+		safeImageLength(s.Width),
+		safeImageLength(s.Height),
+		s.Fd,
+		s.StartColor,
+		s.EndColor,
+	)
+}
+
 func (s *SyllableImage) SetStartColor(c color.RGBA) {
 	s.StartColor = c
-	// 只需要重绘渐变图像
-	s.GradientImage.Deallocate()
-	s.GradientImage, s.Offset = CreateGradientImage(
-		int(s.Width),
-		int(s.Height),
-		s.Fd,
-		s.StartColor,
-		s.EndColor,
-	)
+	s.rebuildGradient()
 }
+
 func (s *SyllableImage) SetEndColor(c color.RGBA) {
 	s.EndColor = c
-	// 只需要重绘渐变图像
-	s.GradientImage.Deallocate()
-	s.GradientImage, s.Offset = CreateGradientImage(
-		int(s.Width),
-		int(s.Height),
-		s.Fd,
-		s.StartColor,
-		s.EndColor,
-	)
+	s.rebuildGradient()
 }
+
 func (s *SyllableImage) SetFd(fd float64) {
 	s.Fd = fd
-	// 只需要重绘渐变图像
-	s.GradientImage.Deallocate()
-	s.GradientImage, s.Offset = CreateGradientImage(
-		int(s.Width),
-		int(s.Height),
-		s.Fd,
-		s.StartColor,
-		s.EndColor,
-	)
-
+	s.rebuildGradient()
 }
+
 func (s *SyllableImage) GetText() string {
 	return s.Text
 }
+
 func (s *SyllableImage) GetFont() text.Face {
+	if s == nil || s.Font == nil {
+		return nil
+	}
 	return *s.Font
 }
+
 func (s *SyllableImage) GetStartColor() color.RGBA {
 	return s.StartColor
 }
+
 func (s *SyllableImage) GetEndColor() color.RGBA {
 	return s.EndColor
 }
+
 func (s *SyllableImage) GetFd() float64 {
 	return s.Fd
 }
+
 func (s *SyllableImage) GetTextMask() *ebiten.Image {
 	return s.TextMask
 }
+
 func (s *SyllableImage) GetGradientImage() *ebiten.Image {
 	return s.GradientImage
 }
+
 func (s *SyllableImage) GetTempImage() *ebiten.Image {
 	return s.tempImage
 }
