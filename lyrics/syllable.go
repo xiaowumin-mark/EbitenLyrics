@@ -165,6 +165,7 @@ func (ls *LineSyllable) SetFont(f text.Face) {
 			continue
 		}
 		ele.SyllableImage.SetFont(f)
+		ele.NowOffset = ele.SyllableImage.GetOffset()
 		ele.GetPosition().SetX(lastX)
 		lastX += ele.SyllableImage.GetWidth()
 		ele.GetPosition().SetOriginX(ele.GetPosition().GetW() / 2)
@@ -178,6 +179,7 @@ func (ls *LineSyllable) Redraw() {
 			continue
 		}
 		ele.SyllableImage.Redraw()
+		ele.NowOffset = ele.SyllableImage.GetOffset()
 		ele.GetPosition().SetOriginX(ele.GetPosition().GetW() / 2)
 		ele.GetPosition().SetOriginY(ele.GetPosition().GetH() * 6 / 5)
 	}

@@ -9,6 +9,8 @@ import (
 
 const DefaultRuntimeFontConfigPath = "config/font.json"
 
+//var DefaultRuntimeFontConfigPath = ""
+
 func LoadResolveOptionsFromFile(path string, base ResolveOptions) (ResolveOptions, error) {
 	opts := base
 	path = strings.TrimSpace(path)

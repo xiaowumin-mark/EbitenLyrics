@@ -110,6 +110,7 @@ type Lyrics struct {
 
 	nowLyrics     []int
 	renderIndex   []int
+	anchorIndex   int
 	Margin        float64
 	HighlightTime time.Duration
 	FD            float64

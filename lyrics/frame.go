@@ -6,6 +6,10 @@ import (
 	"time"
 )
 
+// useRealtimeOffsetFormula controls whether to compute karaoke offsets per-frame.
+// Set this to false to rollback to the createFrames keyframe strategy.
+var useRealtimeOffsetFormula = false
+
 // createFrames 生成卡拉OK逐字动画的关键帧
 // targetIndex: 当前正在生成动画的单词索引
 // blocks: 整行歌词的所有单词信息
@@ -163,4 +167,104 @@ func createFrames(blocks []*SyllableElement, targetIndex int, lineStartTime, lin
 	}
 
 	return frames
+}
+
+func clampOffsetRange(value, minOffset float64) float64 {
+	if value < minOffset {
+		return minOffset
+	}
+	if value > 0 {
+		return 0
+	}
+	return value
+}
+
+func segmentProgress(now, start, end time.Duration) float64 {
+	if end <= start {
+		if now >= end {
+			return 1
+		}
+		return 0
+	}
+	if now <= start {
+		return 0
+	}
+	if now >= end {
+		return 1
+	}
+	return float64(now-start) / float64(end-start)
+}
+
+func applyRealtimeOffsets(blocks []*SyllableElement, now time.Duration, fadeRatio float64) {
+	n := len(blocks)
+	if n == 0 {
+		return
+	}
+	if fadeRatio <= 0 {
+		fadeRatio = 0.0001
+	}
+
+	lineStart := blocks[0].StartTime
+	lastEnd := blocks[n-1].EndTime
+	if now < lineStart {
+		now = lineStart
+	}
+	if now > lastEnd {
+		now = lastEnd
+	}
+
+	widths := make([]float64, n)
+	prefix := make([]float64, n)
+	movedWidth := 0.0
+	firstProgress := 0.0
+	lastProgress := 0.0
+
+	for i, block := range blocks {
+		if block == nil || block.SyllableImage == nil {
+			continue
+		}
+		w := block.SyllableImage.GetWidth()
+		if w <= 0 {
+			w = 1
+		}
+		widths[i] = w
+		if i > 0 {
+			prefix[i] = prefix[i-1] + widths[i-1]
+		}
+
+		progress := segmentProgress(now, block.StartTime, block.EndTime)
+		movedWidth += w * progress
+
+		if i == 0 {
+			firstProgress = progress
+		}
+		if i == n-1 {
+			lastProgress = progress
+		}
+	}
+
+	extraFadeFactor := 1.5*firstProgress + 0.5*lastProgress
+
+	for i, block := range blocks {
+		if block == nil || block.SyllableImage == nil {
+			continue
+		}
+		w := widths[i]
+		if w <= 0 {
+			w = block.SyllableImage.GetWidth()
+			if w <= 0 {
+				w = 1
+			}
+		}
+
+		h := block.SyllableImage.GetHeight()
+		if h <= 0 {
+			h = 1
+		}
+		fadeWidth := h * fadeRatio
+		initialPos := -(prefix[i] + w + fadeWidth*2)
+		minOffset := -(w + fadeWidth - 4)
+		currentPos := initialPos + movedWidth + fadeWidth*extraFadeFactor
+		block.NowOffset = clampOffsetRange(currentPos, minOffset)
+	}
 }

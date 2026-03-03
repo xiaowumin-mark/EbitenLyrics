@@ -12,6 +12,7 @@ import (
 func New(ttmllines []ttml.LyricLine, screenW float64, f *text.GoTextFaceSource, fs, fd float64) (*Lyrics, error) {
 	var lyrics Lyrics
 	lyrics.FD = fd
+	lyrics.anchorIndex = -1
 	for _, line := range ttmllines {
 		l := NewLine(
 			time.Duration(line.StartTime)*time.Millisecond,

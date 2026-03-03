@@ -1,0 +1,92 @@
+//kage:unit pixels
+
+package main
+
+var Time float
+var Volume float
+var Alpha float
+
+const inv255 = 1.0 / 255.0
+const halfInv255 = 0.5 / 255.0
+const gradientNoiseA = 52.9829189
+const gradientNoiseBx = 0.06711056
+const gradientNoiseBy = 0.00583715
+
+func gradientNoise(uv vec2) float {
+	return fract(gradientNoiseA * fract(dot(uv, vec2(gradientNoiseBx, gradientNoiseBy))))
+}
+
+func rotate2D(v vec2, angle float) vec2 {
+	s := sin(angle)
+	c := cos(angle)
+	return vec2(c*v.x-s*v.y, s*v.x+c*v.y)
+}
+
+func mirrorCoord(x float) float {
+	v := mod(x, 2.0)
+	if v < 0.0 {
+		v += 2.0
+	}
+	if v > 1.0 {
+		return 2.0 - v
+	}
+	return v
+}
+
+func mirrorRepeat(uv vec2) vec2 {
+	return vec2(mirrorCoord(uv.x), mirrorCoord(uv.y))
+}
+
+// Pixel-unit shaders use point sampling internally.
+// Rebuild linear sampling so the 32x32 reduced cover behaves like WebGL LINEAR.
+func sampleLinear(localPos vec2) vec4 {
+	size := imageSrc0Size()
+	origin := imageSrc0Origin()
+
+	// Clamp inside local source bounds to avoid reading outside the source region.
+	localPos = clamp(localPos, vec2(1.0), max(vec2(1.0), size-vec2(1.0)))
+	p0 := localPos - vec2(0.5)
+	p1 := localPos + vec2(0.5)
+
+	c0 := imageSrc0At(origin + p0)
+	c1 := imageSrc0At(origin + vec2(p1.x, p0.y))
+	c2 := imageSrc0At(origin + vec2(p0.x, p1.y))
+	c3 := imageSrc0At(origin + p1)
+
+	rate := fract(p1)
+	return mix(mix(c0, c1, rate.x), mix(c2, c3, rate.x), rate.y)
+}
+
+func Fragment(dstPos vec4, srcPos vec2, color vec4) vec4 {
+	size := imageSrc0Size()
+	origin := imageSrc0Origin()
+	if size.x <= 0.0 || size.y <= 0.0 {
+		return vec4(0)
+	}
+
+	uv := (srcPos - origin) / size
+
+	volumeEffect := Volume * 2.0
+	timeVolume := Time + Volume
+
+	dither := inv255*gradientNoise(dstPos.xy) - halfInv255
+	centeredUV := uv - vec2(0.2)
+	rotatedUV := rotate2D(centeredUV, timeVolume*2.0)
+	finalUV := rotatedUV*max(0.001, 1.0-volumeEffect) + vec2(0.5)
+	finalUV = mirrorRepeat(finalUV)
+	finalUV = clamp(finalUV, vec2(0.001), vec2(0.999))
+
+	result := sampleLinear(finalUV * size)
+
+	alphaVolumeFactor := Alpha * max(0.5, 1.0-Volume*0.5)
+	result.rgb *= color.rgb * alphaVolumeFactor
+	result.a *= alphaVolumeFactor * color.a
+	result.rgb += vec3(dither)
+
+	dist := distance(uv, vec2(0.5))
+	vignette := smoothstep(0.8, 0.3, dist)
+	mask := 0.6 + vignette*0.4
+	result.rgb *= mask
+
+	return result
+}

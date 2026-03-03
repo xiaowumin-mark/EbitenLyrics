@@ -4,6 +4,7 @@ import (
 	"EbitenLyrics/ttml"
 	"image/color"
 	"strings"
+	"unicode"
 
 	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/hajimehoshi/ebiten/v2/text/v2"
@@ -230,7 +231,7 @@ func (LayoutLayer) ResizeLyrics(l *Lyrics, w float64) {
 	}
 }
 
-func splitBySpaceWords(words []string, includeSpaces bool) [][]int {
+func splitLyricsIntoGroups(words []string, includeSpaces bool) [][]int {
 	var result [][]int
 	var currentWordIndices []int
 
@@ -242,7 +243,10 @@ func splitBySpaceWords(words []string, includeSpaces bool) [][]int {
 	}
 
 	for index, word := range words {
-		if strings.TrimSpace(word) == "" {
+		// 1. 检查是否全是空白字符 (空格, 制表符, 换行等)
+		isAllSpace := len(word) > 0 && strings.TrimSpace(word) == ""
+
+		if isAllSpace {
 			flush()
 			if includeSpaces {
 				result = append(result, []int{index})
@@ -250,14 +254,30 @@ func splitBySpaceWords(words []string, includeSpaces bool) [][]int {
 			continue
 		}
 
+		// 2. 检查是否是单个中文字符
 		if isSingleChineseChar(word) {
 			flush()
 			result = append(result, []int{index})
 			continue
 		}
 
+		// 3. 常规内容处理
 		currentWordIndices = append(currentWordIndices, index)
-		if strings.HasSuffix(word, " ") {
+
+		// 4. 检查是否需要在此处截断（单词结束标志）
+		// 如果包含连字符 "-"，","，或者末尾有空白字符
+		hasHyphen := strings.Contains(word, "-") || strings.Contains(word, ",")
+
+		// 检查末尾是否有任何空白字符 (Unicode 兼容)
+		hasTrailingSpace := false
+		if len(word) > 0 {
+			lastRune := []rune(word)[len([]rune(word))-1]
+			if unicode.IsSpace(lastRune) {
+				hasTrailingSpace = true
+			}
+		}
+
+		if hasHyphen || hasTrailingSpace {
 			flush()
 		}
 	}
@@ -266,12 +286,13 @@ func splitBySpaceWords(words []string, includeSpaces bool) [][]int {
 	return result
 }
 
+// 修改原有的调用函数
 func SplitBySpace(line *Line, includeSpaces bool) [][]int {
 	words := make([]string, 0, len(line.Syllables))
 	for _, element := range line.Syllables {
 		words = append(words, element.Syllable)
 	}
-	return splitBySpaceWords(words, includeSpaces)
+	return splitLyricsIntoGroups(words, includeSpaces)
 }
 
 func SplitBySpaceTTML(line []ttml.LyricWord, includeSpaces bool) [][]int {
@@ -279,7 +300,7 @@ func SplitBySpaceTTML(line []ttml.LyricWord, includeSpaces bool) [][]int {
 	for _, element := range line {
 		words = append(words, element.Word)
 	}
-	return splitBySpaceWords(words, includeSpaces)
+	return splitLyricsIntoGroups(words, includeSpaces)
 }
 
 func isChineseChar(c rune) bool {

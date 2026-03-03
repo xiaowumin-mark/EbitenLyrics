@@ -52,7 +52,7 @@ func (l *LyricsComponent) Init() {
 	l.recreateImage()
 }
 
-func (l *LyricsComponent) SetLyrics(ls []ttml.LyricLine) *LyricsComponent {
+/*func (l *LyricsComponent) SetLyrics(ls []ttml.LyricLine) *LyricsComponent {
 	l.recreateImage()
 	if l.LyricsControl != nil {
 		l.LyricsControl.Dispose()
@@ -69,8 +69,39 @@ func (l *LyricsComponent) SetLyrics(ls []ttml.LyricLine) *LyricsComponent {
 	l.LyricsControl.HighlightTime = time.Millisecond * 800
 	l.LyricsControl.Scroll([]int{0}, 0)
 	return l
-}
+}*/
+// 在 comps/lyrics/new.go 中优化 SetLyrics 方法
+func (l *LyricsComponent) SetLyrics(ls []ttml.LyricLine) *LyricsComponent {
+	// 重用现有图像，避免频繁分配
+	if l.LyricsControl != nil {
+		l.LyricsControl.Dispose()
+		l.LyricsControl = nil
+	}
 
+	// 只有在尺寸变化时才重新创建图像
+	if l.Image != nil {
+		currentW, currentH := l.Image.Size()
+		if currentW != safeImageSize(l.Width) || currentH != safeImageSize(l.Height) {
+			l.Image.Deallocate()
+			l.Image = nil
+		}
+	}
+
+	if l.Image == nil {
+		l.Image = ebiten.NewImage(safeImageSize(l.Width), safeImageSize(l.Height))
+	}
+
+	control, err := lyrics.New(ls, l.Width, l.Font, l.FontSize, l.FD)
+	if err != nil {
+		log.Printf("lyrics init failed: %v", err)
+		return l
+	}
+	l.LyricsControl = control
+	l.LyricsControl.AnimateManager = l.AnimateManager
+	l.LyricsControl.HighlightTime = time.Millisecond * 800
+	l.LyricsControl.Scroll([]int{0}, 0)
+	return l
+}
 func (l *LyricsComponent) Update(t time.Duration) {
 	if l.LyricsControl == nil {
 		return

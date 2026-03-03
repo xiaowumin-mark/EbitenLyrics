@@ -1,0 +1,39 @@
+//kage:unit pixels
+
+package main
+
+var From float      // 渐变起始位置 (0~1)
+var To float        // 渐变结束位置 (0~1)
+var StartColor vec4 // 纯色1 (premultiplied)
+var EndColor vec4   // 纯色2 (premultiplied)
+var Alpha float     // 前两段透明度系数 (0~1)
+
+func Fragment(dst vec4, src vec2, color vec4) vec4 {
+    // src.x 是像素坐标，需要归一化到 [0, 1]
+    // 注意：Kage 中 imageSrcTextureSize() 获取源尺寸
+    x := src.x / imageSrcTextureSize().x
+
+    var result vec4
+
+    if x < From {
+        // 第一段：纯色1，透明度受 Alpha 控制
+        base := mix(EndColor, StartColor, 1.0)
+        result = vec4(base.rgb, mix(EndColor.a, base.a, Alpha))
+        result.rgb *= result.a / base.a // 修正 premultiplied
+    } else if x > To {
+        // 第三段：纯色2，固定不变
+        result = EndColor
+    } else {
+        // 第二段：渐变，透明度受 Alpha 控制
+        t := (x - From) / (To - From)
+        blended := mix(StartColor, EndColor, t)
+        targetA := mix(EndColor.a, blended.a, Alpha)
+        if blended.a > 0.0 {
+            result = vec4(blended.rgb * (targetA / blended.a), targetA)
+        } else {
+            result = vec4(0, 0, 0, targetA)
+        }
+    }
+
+    return result
+}

@@ -51,17 +51,19 @@ var (
 	latinProbeRunes = []rune{'A', 'a', '0'}
 	cjkProbeRunes   = []rune{'\u4e2d', '\u6587', '\u4f60', '\u597d'}
 
+	maxCandidateWithFamilies = 72
+	maxCandidateNoFamilies   = 140
+	maxCoverageCacheEntries  = 512
+
 	allFontsOnce   sync.Once
 	allFontsCached []string
-
-	loadSourceCacheMu sync.RWMutex
-	loadSourceCache   = map[string][]*text.GoTextFaceSource{}
 
 	resolvedCacheMu sync.RWMutex
 	resolvedCache   = map[string]*ResolvedFace{}
 
 	coverageCacheMu sync.RWMutex
-	coverageCache   = map[*text.GoTextFaceSource]coverageState{}
+	coverageCache   = map[string]coverageState{}
+	coverageOrder   []string
 )
 
 type coverageState struct {
@@ -121,8 +123,8 @@ func DefaultFamilies() []string {
 			"PingFang SC",
 			"Noto Sans CJK SC",
 			"Source Han Sans SC",
-			"SimHei",
-			"SimSun",
+			//"SimHei",
+			//"SimSun",
 			"Segoe UI",
 			"Arial Unicode MS",
 		}
@@ -206,15 +208,6 @@ func cloneResolvedFace(face *ResolvedFace) *ResolvedFace {
 		Weight: face.Weight,
 		Source: face.Source,
 	}
-}
-
-func cloneSourceSlice(src []*text.GoTextFaceSource) []*text.GoTextFaceSource {
-	if len(src) == 0 {
-		return nil
-	}
-	dst := make([]*text.GoTextFaceSource, len(src))
-	copy(dst, src)
-	return dst
 }
 
 func resolveCacheKey(opts ResolveOptions) string {
@@ -332,32 +325,28 @@ func loadSources(path string) ([]*text.GoTextFaceSource, error) {
 	}
 	path = filepath.Clean(path)
 
-	loadSourceCacheMu.RLock()
-	if cached, ok := loadSourceCache[path]; ok && len(cached) > 0 {
-		loadSourceCacheMu.RUnlock()
-		return cloneSourceSlice(cached), nil
-	}
-	loadSourceCacheMu.RUnlock()
-
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
 	}
 	if sources, err := text.NewGoTextFaceSourcesFromCollection(bytes.NewReader(data)); err == nil && len(sources) > 0 {
-		loadSourceCacheMu.Lock()
-		loadSourceCache[path] = cloneSourceSlice(sources)
-		loadSourceCacheMu.Unlock()
 		return sources, nil
 	}
 	source, err := text.NewGoTextFaceSource(bytes.NewReader(data))
 	if err != nil {
 		return nil, err
 	}
-	sources := []*text.GoTextFaceSource{source}
-	loadSourceCacheMu.Lock()
-	loadSourceCache[path] = cloneSourceSlice(sources)
-	loadSourceCacheMu.Unlock()
-	return sources, nil
+	return []*text.GoTextFaceSource{source}, nil
+}
+
+func candidateLimit(opts ResolveOptions) int {
+	if strings.TrimSpace(opts.Path) != "" {
+		return 1
+	}
+	if len(opts.Families) == 0 {
+		return maxCandidateNoFamilies
+	}
+	return maxCandidateWithFamilies
 }
 
 func buildCandidates(opts ResolveOptions) []scoredPath {
@@ -390,7 +379,7 @@ func buildCandidates(opts ResolveOptions) []scoredPath {
 		return candidates[i].score > candidates[j].score
 	})
 
-	maxCandidates := 260
+	maxCandidates := candidateLimit(opts)
 	if len(candidates) > maxCandidates {
 		candidates = candidates[:maxCandidates]
 	}
@@ -415,22 +404,39 @@ func supportsRunes(source *text.GoTextFaceSource, probes []rune) bool {
 	return true
 }
 
-func coverageScore(source *text.GoTextFaceSource, requireCJK bool) (score int, hasCJK bool) {
+func sourceCoverageKey(path string, sourceIndex int) string {
+	return fmt.Sprintf("%s#%d", path, sourceIndex)
+}
+
+func putCoverageCache(key string, state coverageState) {
+	coverageCacheMu.Lock()
+	defer coverageCacheMu.Unlock()
+
+	if _, exists := coverageCache[key]; !exists {
+		coverageOrder = append(coverageOrder, key)
+		if len(coverageOrder) > maxCoverageCacheEntries {
+			evict := coverageOrder[0]
+			coverageOrder = coverageOrder[1:]
+			delete(coverageCache, evict)
+		}
+	}
+	coverageCache[key] = state
+}
+
+func coverageScore(cacheKey string, source *text.GoTextFaceSource, requireCJK bool) (score int, hasCJK bool) {
 	if source == nil {
 		return -2000, false
 	}
 
 	coverageCacheMu.RLock()
-	state, ok := coverageCache[source]
+	state, ok := coverageCache[cacheKey]
 	coverageCacheMu.RUnlock()
 	if !ok {
 		state = coverageState{
 			latinOK: supportsRunes(source, latinProbeRunes),
 			hasCJK:  supportsRunes(source, cjkProbeRunes),
 		}
-		coverageCacheMu.Lock()
-		coverageCache[source] = state
-		coverageCacheMu.Unlock()
+		putCoverageCache(cacheKey, state)
 	}
 	latinOK := state.latinOK
 	hasCJK = state.hasCJK
@@ -479,12 +485,23 @@ func ResolveFaceSource(opts ResolveOptions) (*ResolvedFace, error) {
 	}
 	best := picked{}
 
+	const (
+		maxFamilyScore   = 220
+		maxStyleScore    = 260
+		maxCoverageScore = 260
+	)
+
 	for _, candidate := range candidates {
+		maxPossible := candidate.score + maxFamilyScore + maxStyleScore + maxCoverageScore
+		if best.hasAny && maxPossible+30 < best.score {
+			continue
+		}
+
 		sources, err := loadSources(candidate.path)
 		if err != nil {
 			continue
 		}
-		for _, source := range sources {
+		for i, source := range sources {
 			if source == nil {
 				continue
 			}
@@ -492,7 +509,8 @@ func ResolveFaceSource(opts ResolveOptions) (*ResolvedFace, error) {
 			currentWeight := normalizeWeight(Weight(meta.Weight))
 			score := candidate.score + scoreFamily(meta.Family, opts.Families) + scoreStyle(meta, opts.Weight, opts.Italic)
 
-			coverage, hasCJK := coverageScore(source, opts.RequireCJK)
+			coverageKey := sourceCoverageKey(candidate.path, i)
+			coverage, hasCJK := coverageScore(coverageKey, source, opts.RequireCJK)
 			score += coverage
 			if opts.RequireCJK && !hasCJK {
 				continue
@@ -509,6 +527,13 @@ func ResolveFaceSource(opts ResolveOptions) (*ResolvedFace, error) {
 					Source: source,
 				}
 			}
+		}
+
+		if strings.TrimSpace(opts.Path) != "" && best.hasAny {
+			break
+		}
+		if best.hasAny && best.score >= 760 {
+			break
 		}
 	}
 

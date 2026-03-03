@@ -11,6 +11,7 @@ func (s *SyllableElement) SetText(text string) {
 	s.Text = text
 	if s.SyllableImage != nil {
 		s.SyllableImage.SetText(s.Text)
+		s.NowOffset = s.SyllableImage.GetOffset()
 	}
 }
 func (s *SyllableElement) GetSyllableImage() *SyllableImage {

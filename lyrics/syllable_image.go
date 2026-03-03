@@ -40,28 +40,17 @@ func CreateSyllableImage(
 	if th <= 0 {
 		th = 1
 	}
-
-	textMask := CreateTextMask(syllable, font, tw, th)
-	gradientImage, offset := CreateGradientImage(
-		safeImageLength(tw),
-		safeImageLength(th),
-		fd,
-		startColor,
-		endColor,
-	)
+	_, _, _, offset := generateBackgroundFadeStyle(tw, th, fd)
 
 	return &SyllableImage{
-		TextMask:      textMask,
-		GradientImage: gradientImage,
-		Offset:        offset,
-		Width:         tw,
-		Height:        th,
-		StartColor:    startColor,
-		EndColor:      endColor,
-		Fd:            fd,
-		Font:          &font,
-		Text:          syllable,
-		tempImage:     ebiten.NewImage(safeImageLength(tw), safeImageLength(th)),
+		Offset:     offset,
+		Width:      tw,
+		Height:     th,
+		StartColor: startColor,
+		EndColor:   endColor,
+		Fd:         fd,
+		Font:       &font,
+		Text:       syllable,
 	}, nil
 }
 
@@ -139,17 +128,71 @@ func CreateGradientImage(width, height int, fd float64, startColor, endColor col
 	return gradientImage, offset
 }
 
+func (s *SyllableImage) updateMetrics() {
+	if s == nil || s.Font == nil || *s.Font == nil {
+		return
+	}
+	tw, th := text.Measure(s.Text, *s.Font, 1.0)
+	if tw <= 0 {
+		tw = 1
+	}
+	if th <= 0 {
+		th = 1
+	}
+	s.Width = tw
+	s.Height = th
+	_, _, _, offset := generateBackgroundFadeStyle(tw, th, s.Fd)
+	s.Offset = offset
+}
+
+func (s *SyllableImage) ensureResources() bool {
+	if s == nil || s.Font == nil || *s.Font == nil {
+		return false
+	}
+	if s.Width <= 0 || s.Height <= 0 {
+		s.updateMetrics()
+	}
+
+	targetW := safeImageLength(s.Width)
+	targetH := safeImageLength(s.Height)
+
+	if s.TextMask == nil {
+		s.TextMask = CreateTextMask(s.Text, *s.Font, s.Width, s.Height)
+	}
+	if s.GradientImage == nil {
+		s.GradientImage, s.Offset = CreateGradientImage(
+			targetW,
+			targetH,
+			s.Fd,
+			s.StartColor,
+			s.EndColor,
+		)
+	}
+	if s.tempImage != nil {
+		w, h := s.tempImage.Size()
+		if w != targetW || h != targetH {
+			s.tempImage.Deallocate()
+			s.tempImage = nil
+		}
+	}
+	if s.tempImage == nil {
+		s.tempImage = ebiten.NewImage(targetW, targetH)
+	}
+
+	return s.TextMask != nil && s.GradientImage != nil && s.tempImage != nil
+}
+
 func (s *SyllableImage) Draw(img *ebiten.Image, offset float64, alpha float64, pos *Position) {
 	// Guard against transient resource disposal during hot-reload paths.
 	defer func() {
 		_ = recover()
 	}()
 
-	if s == nil || img == nil || pos == nil || s.TextMask == nil || s.GradientImage == nil {
+	if s == nil || img == nil || pos == nil {
 		return
 	}
-	if s.tempImage == nil {
-		s.tempImage = ebiten.NewImage(safeImageLength(s.Width), safeImageLength(s.Height))
+	if !s.ensureResources() {
+		return
 	}
 
 	s.tempImage.Clear()
@@ -172,17 +215,17 @@ func (s *SyllableImage) Dispose() {
 	if s == nil {
 		return
 	}
-	if s.tempImage != nil {
-		s.tempImage.Deallocate()
-		s.tempImage = nil
+	if s.TextMask != nil {
+		s.TextMask.Deallocate()
+		s.TextMask = nil
 	}
 	if s.GradientImage != nil {
 		s.GradientImage.Deallocate()
 		s.GradientImage = nil
 	}
-	if s.TextMask != nil {
-		s.TextMask.Deallocate()
-		s.TextMask = nil
+	if s.tempImage != nil {
+		s.tempImage.Deallocate()
+		s.tempImage = nil
 	}
 }
 
@@ -231,30 +274,14 @@ func (s *SyllableImage) Redraw() {
 	}
 
 	s.Dispose()
-	tw, th := text.Measure(s.Text, *s.Font, 1.0)
-	if tw <= 0 {
-		tw = 1
-	}
-	if th <= 0 {
-		th = 1
-	}
-
-	s.TextMask = CreateTextMask(s.Text, *s.Font, tw, th)
-	s.GradientImage, s.Offset = CreateGradientImage(
-		safeImageLength(tw),
-		safeImageLength(th),
-		s.Fd,
-		s.StartColor,
-		s.EndColor,
-	)
-	s.Width = tw
-	s.Height = th
-	s.tempImage = ebiten.NewImage(safeImageLength(tw), safeImageLength(th))
+	s.updateMetrics()
+	s.ensureResources()
 }
 
 func (s *SyllableImage) SetText(t string) {
 	s.Text = t
-	s.Redraw()
+	s.Dispose()
+	s.updateMetrics()
 }
 
 func (s *SyllableImage) SetFont(f text.Face) {
@@ -262,17 +289,25 @@ func (s *SyllableImage) SetFont(f text.Face) {
 		return
 	}
 	s.Font = &f
-	s.Redraw()
+	s.Dispose()
+	s.updateMetrics()
 }
 
 func (s *SyllableImage) rebuildGradient() {
 	if s == nil {
 		return
 	}
-	if s.GradientImage != nil {
-		s.GradientImage.Deallocate()
-		s.GradientImage = nil
+	if s.Width <= 0 || s.Height <= 0 {
+		s.updateMetrics()
 	}
+	_, _, _, offset := generateBackgroundFadeStyle(s.Width, s.Height, s.Fd)
+	s.Offset = offset
+
+	if s.GradientImage == nil {
+		return
+	}
+	s.GradientImage.Deallocate()
+	s.GradientImage = nil
 	s.GradientImage, s.Offset = CreateGradientImage(
 		safeImageLength(s.Width),
 		safeImageLength(s.Height),
