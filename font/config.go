@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 )
 
@@ -22,7 +23,6 @@ func LoadResolveOptionsFromFile(path string, base ResolveOptions) (ResolveOption
 	if err != nil {
 		return opts, err
 	}
-
 	var raw map[string]any
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return opts, fmt.Errorf("parse font config %s failed: %w", path, err)
@@ -34,18 +34,30 @@ func LoadResolveOptionsFromFile(path string, base ResolveOptions) (ResolveOption
 		}
 	}
 
-	if v, ok := raw["path"]; ok {
-		if s, ok := v.(string); ok {
-			s = strings.TrimSpace(s)
-			if s != "" {
-				opts.Path = s
-			}
+	var rawPath string
+	for _, key := range []string{"path", "fontPath", "font_file", "file"} {
+		v, ok := raw[key]
+		if !ok {
+			continue
 		}
+		s, ok := v.(string)
+		if !ok {
+			continue
+		}
+		s = strings.TrimSpace(s)
+		if s == "" {
+			continue
+		}
+		rawPath = s
+		break
 	}
 
 	parsed, err := ParseResolveOptions(opts, raw)
 	if err != nil {
 		return opts, fmt.Errorf("invalid font config %s: %w", path, err)
+	}
+	if rawPath != "" {
+		parsed.Path = resolvePathFromBase(rawPath, filepath.Dir(path))
 	}
 	return parsed, nil
 }

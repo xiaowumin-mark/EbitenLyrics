@@ -6,6 +6,8 @@ import (
 	"EbitenLyrics/ttml"
 	"log"
 	"math"
+	"runtime"
+	"runtime/debug"
 	"time"
 
 	"github.com/hajimehoshi/ebiten/v2"
@@ -16,16 +18,18 @@ type LyricsComponent struct {
 	LyricsControl  *lyrics.Lyrics
 	AnimateManager *anim.Manager
 	Font           *text.GoTextFaceSource
+	FallbackFonts  []*text.GoTextFaceSource
 	Width, Height  float64
 	FontSize       float64
 	FD             float64
 	Image          *ebiten.Image
 }
 
-func NewLyricsComponent(anim *anim.Manager, f *text.GoTextFaceSource, w, h, fs, fd float64) *LyricsComponent {
+func NewLyricsComponent(anim *anim.Manager, f *text.GoTextFaceSource, fallbacks []*text.GoTextFaceSource, w, h, fs, fd float64) *LyricsComponent {
 	return &LyricsComponent{
 		AnimateManager: anim,
 		Font:           f,
+		FallbackFonts:  append([]*text.GoTextFaceSource{}, fallbacks...),
 		Width:          w,
 		Height:         h,
 		FontSize:       fs,
@@ -52,14 +56,21 @@ func (l *LyricsComponent) Init() {
 	l.recreateImage()
 }
 
+func releaseLyricsMemory() {
+	lyrics.PurgeSharedImageCache()
+	runtime.GC()
+	debug.FreeOSMemory()
+}
+
 /*func (l *LyricsComponent) SetLyrics(ls []ttml.LyricLine) *LyricsComponent {
 	l.recreateImage()
 	if l.LyricsControl != nil {
 		l.LyricsControl.Dispose()
 		l.LyricsControl = nil
+		releaseLyricsMemory()
 	}
 
-	control, err := lyrics.New(ls, l.Width, l.Font, l.FontSize, l.FD)
+	control, err := lyrics.New(ls, l.Width, l.Font, l.FallbackFonts, l.FontSize, l.FD)
 	if err != nil {
 		log.Printf("lyrics init failed: %v", err)
 		return l
@@ -76,6 +87,7 @@ func (l *LyricsComponent) SetLyrics(ls []ttml.LyricLine) *LyricsComponent {
 	if l.LyricsControl != nil {
 		l.LyricsControl.Dispose()
 		l.LyricsControl = nil
+		releaseLyricsMemory()
 	}
 
 	// 只有在尺寸变化时才重新创建图像
@@ -91,7 +103,7 @@ func (l *LyricsComponent) SetLyrics(ls []ttml.LyricLine) *LyricsComponent {
 		l.Image = ebiten.NewImage(safeImageSize(l.Width), safeImageSize(l.Height))
 	}
 
-	control, err := lyrics.New(ls, l.Width, l.Font, l.FontSize, l.FD)
+	control, err := lyrics.New(ls, l.Width, l.Font, l.FallbackFonts, l.FontSize, l.FD)
 	if err != nil {
 		log.Printf("lyrics init failed: %v", err)
 		return l
@@ -135,13 +147,14 @@ func (l *LyricsComponent) SetFontSize(fs float64) *LyricsComponent {
 	return l
 }
 
-func (l *LyricsComponent) SetFont(font *text.GoTextFaceSource) *LyricsComponent {
+func (l *LyricsComponent) SetFont(font *text.GoTextFaceSource, fallbacks []*text.GoTextFaceSource) *LyricsComponent {
 	if l.LyricsControl == nil {
 		return l
 	}
 	l.Font = font
+	l.FallbackFonts = append([]*text.GoTextFaceSource{}, fallbacks...)
 	for _, line := range l.LyricsControl.Lines {
-		line.SetFont(font)
+		line.SetFont(font, fallbacks)
 	}
 	l.LyricsControl.Scroll(l.LyricsControl.GetNowLyrics(), 0)
 	return l
@@ -185,12 +198,18 @@ func (l *LyricsComponent) Draw(screen *ebiten.Image, p *lyrics.Position) {
 }
 
 func (l *LyricsComponent) Dispose() {
+	released := false
 	if l.LyricsControl != nil {
 		l.LyricsControl.Dispose()
 		l.LyricsControl = nil
+		released = true
 	}
 	if l.Image != nil {
 		l.Image.Deallocate()
 		l.Image = nil
+		released = true
+	}
+	if released {
+		releaseLyricsMemory()
 	}
 }

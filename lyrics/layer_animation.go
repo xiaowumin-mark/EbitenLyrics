@@ -261,7 +261,7 @@ func (AnimationLayer) UpdateLyrics(l *Lyrics, t time.Duration) {
 				0,
 				1,
 				line.GetPosition().GetScaleX(),
-				adaptiveLineScale(line.fontsize),
+				1,
 				anim.EaseInOut,
 				func(value float64) {
 					line.GetPosition().SetScaleX(value)
@@ -291,7 +291,7 @@ func (AnimationLayer) UpdateLyrics(l *Lyrics, t time.Duration) {
 					0,
 					1,
 					line.GetPosition().GetScaleX(),
-					1,
+					inactiveLineScale(line.fontsize),
 					anim.EaseInOut,
 					func(value float64) {
 						line.GetPosition().SetScaleX(value)
@@ -318,6 +318,11 @@ func (AnimationLayer) NormalizeLine(l *Line, lyrics *Lyrics) {
 	if l == nil || lyrics == nil {
 		return
 	}
+	if l.GradientColorAnimate != nil {
+		l.GradientColorAnimate.Cancel()
+		l.GradientColorAnimate = nil
+	}
+
 	for _, e := range l.OuterSyllableElements {
 		if e.UpAnimate != nil {
 			e.UpAnimate.Cancel()
@@ -341,14 +346,44 @@ func (AnimationLayer) NormalizeLine(l *Line, lyrics *Lyrics) {
 		lyrics.AnimateManager.Add(e.UpAnimate)
 	}
 
+	currentHighlightAlpha := 0.0
 	for _, e := range l.OuterSyllableElements {
 		if e.Animate != nil {
 			e.Animate.Cancel()
 			e.Animate = nil
 		}
-		if e.SyllableImage != nil {
-			e.NowOffset = e.SyllableImage.GetOffset()
+		if e != nil && e.Alpha > currentHighlightAlpha {
+			currentHighlightAlpha = e.Alpha
 		}
+	}
+	if currentHighlightAlpha > 0 && len(l.OuterSyllableElements) > 0 {
+		l.GradientColorAnimate = anim.NewTween(
+			uuid.NewString(),
+			320*time.Millisecond,
+			0,
+			1,
+			currentHighlightAlpha,
+			0,
+			anim.EaseOut,
+			func(value float64) {
+				for _, e := range l.OuterSyllableElements {
+					if e == nil {
+						continue
+					}
+					e.Alpha = value
+				}
+			},
+			func() {
+				for _, e := range l.OuterSyllableElements {
+					if e == nil {
+						continue
+					}
+					e.Alpha = 0
+				}
+				l.GradientColorAnimate = nil
+			},
+		)
+		lyrics.AnimateManager.Add(l.GradientColorAnimate)
 	}
 
 	if l.IsBackground {
@@ -372,8 +407,9 @@ func (AnimationLayer) NormalizeLine(l *Line, lyrics *Lyrics) {
 			func() {
 				l.GetPosition().SetAlpha(0)
 				l.Position.SetTranslateY(0)
-				l.Position.SetScaleX(1)
-				l.Position.SetScaleY(1)
+				baseScale := inactiveLineScale(l.fontsize)
+				l.Position.SetScaleX(baseScale)
+				l.Position.SetScaleY(baseScale)
 			},
 		)
 		lyrics.AnimateManager.Add(l.AlphaAnimate)
@@ -387,6 +423,7 @@ func (AnimationLayer) LineAnimate(l *Line, lyrics *Lyrics, fd float64) {
 	lineAnimationLayer.FrameAnimate(l, lyrics, fd)
 
 	for _, it := range l.BackgroundLines {
+		targetScale := inactiveLineScale(it.fontsize)
 		it.AlphaAnimate = anim.NewKeyframeAnimation(
 			uuid.NewString(),
 			700*time.Millisecond,
@@ -394,8 +431,8 @@ func (AnimationLayer) LineAnimate(l *Line, lyrics *Lyrics, fd float64) {
 			1,
 			false,
 			[]anim.Keyframe{
-				{Offset: 0, Values: []float64{it.GetPosition().GetAlpha(), 0.92}, Ease: anim.EaseOut},
-				{Offset: 1, Values: []float64{1, 1}, Ease: anim.EaseOut},
+				{Offset: 0, Values: []float64{it.GetPosition().GetAlpha(), it.GetPosition().GetScaleX()}, Ease: anim.EaseOut},
+				{Offset: 1, Values: []float64{1, targetScale}, Ease: anim.EaseOut},
 			},
 			func(value []float64) {
 				it.Position.SetAlpha(value[0])
@@ -404,8 +441,8 @@ func (AnimationLayer) LineAnimate(l *Line, lyrics *Lyrics, fd float64) {
 			},
 			func() {
 				it.Position.SetAlpha(1)
-				it.Position.SetScaleX(1)
-				it.Position.SetScaleY(1)
+				it.Position.SetScaleX(targetScale)
+				it.Position.SetScaleY(targetScale)
 			},
 		)
 		lyrics.AnimateManager.Add(it.AlphaAnimate)
@@ -419,8 +456,18 @@ func (AnimationLayer) FrameAnimate(l *Line, lyrics *Lyrics, fd float64) {
 		return
 	}
 	l.Status = Hot
+	if l.GradientColorAnimate != nil {
+		l.GradientColorAnimate.Cancel()
+		l.GradientColorAnimate = nil
+	}
 	if len(l.OuterSyllableElements) == 0 {
 		return
+	}
+	for _, e := range l.OuterSyllableElements {
+		if e == nil {
+			continue
+		}
+		e.Alpha = 1
 	}
 
 	if useRealtimeOffsetFormula {
@@ -478,7 +525,7 @@ func (AnimationLayer) FrameAnimate(l *Line, lyrics *Lyrics, fd float64) {
 				hlap := anim.MapRange(float64(duration.Milliseconds()), 800, 3000, 0.1, 1)
 
 				if ele.BackgroundBlurText == nil {
-					ele.BackgroundBlurText = NewTextShadow(ele.Text, l.Font, l.fontsize)
+					ele.BackgroundBlurText = NewTextShadow(ele.Text, l.activeFace(), l.fontsize)
 				}
 				ele.BackgroundBlurText.Blur = hl
 
@@ -684,6 +731,12 @@ func adaptiveLineScale(fontSize float64) float64 {
 	fontFactor := anim.MapRange(fontSize, 18, 96, 0.75, 1.25)
 	scaleBoost := clampFloat(0.03*fontFactor, 0.018, 0.055)
 	return 1 + scaleBoost
+}
+
+func inactiveLineScale(fontSize float64) float64 {
+	fontFactor := anim.MapRange(fontSize, 18, 96, 0.75, 1.25)
+	scaleReduce := clampFloat(0.03*fontFactor, 0.018, 0.055)
+	return 1 - scaleReduce
 }
 
 func adaptiveWordScale(durationMs, fontSize float64) float64 {

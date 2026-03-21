@@ -143,10 +143,10 @@ func (a *lowFreqAnalyzer) AnalyzePCM(data []byte) (float64, bool) {
 	// 3. 执行 FFT
 	fftInPlace(fftBuf)
 
-	// 4. 计算目标频段能量 (20Hz - 250Hz)
+	// 4. 计算目标频段能量 (20Hz - 300Hz)
 	freqRes := a.sampleRate / float64(nfft)
 	minBin := int(math.Ceil(20.0 / freqRes))
-	maxBin := int(math.Floor(250.0 / freqRes))
+	maxBin := int(math.Floor(300.0 / freqRes))
 	if minBin < 1 {
 		minBin = 1
 	}

@@ -586,6 +586,23 @@ func preprocessAlbumImage(src image.Image) *ebiten.Image {
 	}
 	small := imaging.Resize(src, 32, 32, imaging.Linear)
 	nrgba := imaging.Clone(small)
+	stats := analyzeAlbumImageStats(nrgba)
+	lumaRange := stats.maxLuma - stats.minLuma
+	satBoost := clamp(
+		1.35-math.Max(0, stats.avgSat-0.28)*0.8-math.Max(0, lumaRange-0.48)*0.25,
+		0.95,
+		1.35,
+	)
+	contrastScale := clamp(
+		1.08-math.Max(0, stats.contrast-0.16)*0.65-math.Max(0, lumaRange-0.52)*0.3,
+		0.88,
+		1.08,
+	)
+	brightnessScale := clamp(
+		1.0-math.Max(0, stats.avgLuma-0.48)*0.55-math.Max(0, stats.maxLuma-0.82)*0.28,
+		0.8,
+		1.0,
+	)
 
 	pixels := nrgba.Pix
 	for i := 0; i+3 < len(pixels); i += 4 {
@@ -593,26 +610,22 @@ func preprocessAlbumImage(src image.Image) *ebiten.Image {
 		g := float64(pixels[i+1])
 		b := float64(pixels[i+2])
 
-		// contrast 0.4
-		r = (r-128)*0.4 + 128
-		g = (g-128)*0.4 + 128
-		b = (b-128)*0.4 + 128
-
-		// saturate 3.0
+		// Keep the cover's original hue more directly so the background
+		// doesn't look like it has a gray wash over it.
 		gray := r*0.3 + g*0.59 + b*0.11
-		r = gray*-2.0 + r*3.0
-		g = gray*-2.0 + g*3.0
-		b = gray*-2.0 + b*3.0
+		r = gray + (r-gray)*satBoost
+		g = gray + (g-gray)*satBoost
+		b = gray + (b-gray)*satBoost
 
-		// contrast 1.7
-		r = (r-128)*1.7 + 128
-		g = (g-128)*1.7 + 128
-		b = (b-128)*1.7 + 128
+		// When the cover is already very bright or has a huge span, gently
+		// compress the range instead of letting the background blow out.
+		r = (r-128)*contrastScale + 128
+		g = (g-128)*contrastScale + 128
+		b = (b-128)*contrastScale + 128
 
-		// brightness 0.75
-		r *= 0.75
-		g *= 0.75
-		b *= 0.75
+		r *= brightnessScale
+		g *= brightnessScale
+		b *= brightnessScale
 
 		pixels[i] = floatToByte(r)
 		pixels[i+1] = floatToByte(g)
@@ -621,6 +634,70 @@ func preprocessAlbumImage(src image.Image) *ebiten.Image {
 
 	blurNRGBA(nrgba, 2, 4)
 	return ebiten.NewImageFromImage(nrgba)
+}
+
+type albumImageStats struct {
+	avgLuma  float64
+	minLuma  float64
+	maxLuma  float64
+	contrast float64
+	avgSat   float64
+}
+
+func analyzeAlbumImageStats(img *image.NRGBA) albumImageStats {
+	stats := albumImageStats{
+		minLuma: 1,
+	}
+	if img == nil || len(img.Pix) == 0 {
+		stats.minLuma = 0
+		return stats
+	}
+
+	var sumLuma, sumLumaSq, sumSat float64
+	var count float64
+	for i := 0; i+3 < len(img.Pix); i += 4 {
+		alpha := float64(img.Pix[i+3]) / 255.0
+		if alpha <= 0 {
+			continue
+		}
+
+		r := float64(img.Pix[i]) / 255.0
+		g := float64(img.Pix[i+1]) / 255.0
+		b := float64(img.Pix[i+2]) / 255.0
+		luma := 0.2126*r + 0.7152*g + 0.0722*b
+		maxC := math.Max(r, math.Max(g, b))
+		minC := math.Min(r, math.Min(g, b))
+		sat := 0.0
+		if maxC > 0 {
+			sat = (maxC - minC) / maxC
+		}
+
+		sumLuma += luma
+		sumLumaSq += luma * luma
+		sumSat += sat
+		count++
+
+		if luma < stats.minLuma {
+			stats.minLuma = luma
+		}
+		if luma > stats.maxLuma {
+			stats.maxLuma = luma
+		}
+	}
+
+	if count == 0 {
+		stats.minLuma = 0
+		return stats
+	}
+
+	stats.avgLuma = sumLuma / count
+	stats.avgSat = sumSat / count
+	variance := sumLumaSq/count - stats.avgLuma*stats.avgLuma
+	if variance < 0 {
+		variance = 0
+	}
+	stats.contrast = math.Sqrt(variance)
+	return stats
 }
 
 func floatToByte(v float64) uint8 {

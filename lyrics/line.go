@@ -9,7 +9,11 @@ import (
 	"github.com/hajimehoshi/ebiten/v2/text/v2"
 )
 
-func NewLine(st, et time.Duration, isduet, isbg bool, ts string, font *text.GoTextFaceSource, fs float64) *Line {
+func NewLine(st, et time.Duration, isduet, isbg bool, ts string, font *text.GoTextFaceSource, fallbacks []*text.GoTextFaceSource, fs float64) *Line {
+	pos := NewPosition(0, 0, 0, 0)
+	baseScale := inactiveLineScale(fs)
+	pos.SetScaleX(baseScale)
+	pos.SetScaleY(baseScale)
 	return &Line{
 		StartTime:       st,
 		EndTime:         et,
@@ -25,21 +29,82 @@ func NewLine(st, et time.Duration, isduet, isbg bool, ts string, font *text.GoTe
 		fontsize:        fs,
 		isShow:          false,
 		Font:            font,
-		Position:        NewPosition(0, 0, 0, 0),
+		FallbackFonts:   append([]*text.GoTextFaceSource{}, fallbacks...),
+		Position:        pos,
 	}
 }
 
-func (l *Line) activeFace() text.Face {
+func (l *Line) faceSources() []*text.GoTextFaceSource {
+	if l == nil {
+		return nil
+	}
+	out := make([]*text.GoTextFaceSource, 0, 1+len(l.FallbackFonts))
+	seen := map[*text.GoTextFaceSource]struct{}{}
 	if l.Font != nil {
-		return &text.GoTextFace{
-			Source: l.Font,
-			Size:   l.fontsize,
+		out = append(out, l.Font)
+		seen[l.Font] = struct{}{}
+	}
+	for _, fallback := range l.FallbackFonts {
+		if fallback == nil {
+			continue
 		}
+		if _, ok := seen[fallback]; ok {
+			continue
+		}
+		seen[fallback] = struct{}{}
+		out = append(out, fallback)
+	}
+	return out
+}
+
+func (l *Line) composeFace(size float64) text.Face {
+	if l == nil || size <= 0 {
+		return nil
+	}
+	sources := l.faceSources()
+	if len(sources) == 0 {
+		return nil
+	}
+
+	faces := make([]text.Face, 0, len(sources))
+	for _, source := range sources {
+		if source == nil {
+			continue
+		}
+		faces = append(faces, &text.GoTextFace{
+			Source: source,
+			Size:   size,
+		})
+	}
+	if len(faces) == 0 {
+		return nil
+	}
+	if len(faces) == 1 {
+		return faces[0]
+	}
+	multiFace, err := text.NewMultiFace(faces...)
+	if err != nil {
+		return faces[0]
+	}
+	return multiFace
+}
+
+func (l *Line) activeFace() text.Face {
+	if l == nil {
+		return nil
 	}
 	if l.Face != nil {
-		return *l.Face
+		return l.Face
 	}
-	return nil
+	l.Face = l.composeFace(l.fontsize)
+	return l.Face
+}
+
+func (l *Line) translatedFace() text.Face {
+	if l == nil {
+		return nil
+	}
+	return l.composeFace(l.fontsize / 2)
 }
 
 func safeImageLength(v float64) int {
@@ -80,13 +145,9 @@ func (l *Line) SetSyllables(syllables []*LineSyllable) {
 	l.OuterSyllableElements = outerSyllableElements
 }
 
-func (l *Line) GetFace(isc bool) *text.Face {
+func (l *Line) GetFace(isc bool) text.Face {
 	_ = isc
-	face := l.activeFace()
-	if face == nil {
-		return nil
-	}
-	return &face
+	return l.activeFace()
 }
 
 func (l *Line) AddBackgroundLine(line *Line) {

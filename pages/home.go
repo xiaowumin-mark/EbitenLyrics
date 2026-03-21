@@ -1,4 +1,4 @@
-﻿package pages
+package pages
 
 import (
 	"EbitenLyrics/anim"
@@ -38,7 +38,8 @@ var runtimeWeightSteps = []f.Weight{
 
 type Home struct {
 	router.BaseScene
-	Font *text.GoTextFaceSource
+	Font          *text.GoTextFaceSource
+	FontFallbacks []*text.GoTextFaceSource
 
 	LyricsImageAnim *anim.Tween
 	AnimateManager  *anim.Manager
@@ -124,6 +125,18 @@ func dedupFamilies(in []string) []string {
 		out = append(out, family)
 	}
 	return out
+}
+
+func sameFontSources(a, b []*text.GoTextFaceSource) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
 
 func normalizeRuntimeWeight(weight f.Weight) f.Weight {
@@ -334,17 +347,18 @@ func (h *Home) applyFontOptions(opts f.ResolveOptions) {
 		return
 	}
 
-	if h.Font == resolved.Source && h.currentFamily == resolved.Family {
+	if h.Font == resolved.Source && h.currentFamily == resolved.Family && sameFontSources(h.FontFallbacks, resolved.Fallbacks) {
 		return
 	}
 
 	h.Font = resolved.Source
+	h.FontFallbacks = append([]*text.GoTextFaceSource{}, resolved.Fallbacks...)
 	h.currentFamily = resolved.Family
 	h.fontWeight = normalizeRuntimeWeight(resolved.Weight)
-	h.fontItalic = resolved.Style == "italic"
+	h.fontItalic = strings.Contains(strings.ToLower(resolved.Style), "italic")
 	h.setCurrentFamilyChoice(resolved.Family)
 	if h.LyricsControl != nil {
-		h.LyricsControl.SetFont(resolved.Source)
+		h.LyricsControl.SetFont(resolved.Source, resolved.Fallbacks)
 	}
 
 	log.Printf(
@@ -764,7 +778,7 @@ func (h *Home) OnCreate() {
 	}
 	h.initFamilyChoices()
 
-	h.LyricsControl = LyricsComponent.NewLyricsComponent(h.AnimateManager, h.Font, float64(ww), float64(hh), h.FontSize, h.FD)
+	h.LyricsControl = LyricsComponent.NewLyricsComponent(h.AnimateManager, h.Font, h.FontFallbacks, float64(ww), float64(hh), h.FontSize, h.FD)
 	h.LyricsControl.Init()
 	meshRenderer, err := bgrender.NewMeshGradientRenderer(ww, hh)
 	if err != nil {

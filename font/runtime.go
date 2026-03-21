@@ -13,6 +13,18 @@ func ParseResolveOptions(base ResolveOptions, cfg map[string]any) (ResolveOption
 		return opts, nil
 	}
 
+	for _, key := range []string{"path", "fontPath", "font_file", "file"} {
+		if v, ok := cfg[key]; ok {
+			if s, ok := v.(string); ok {
+				s = normalizePathInput(s)
+				if s != "" {
+					opts.Path = s
+					break
+				}
+			}
+		}
+	}
+
 	if v, ok := cfg["family"]; ok {
 		families := parseFamiliesFromAny(v)
 		if len(families) > 0 {

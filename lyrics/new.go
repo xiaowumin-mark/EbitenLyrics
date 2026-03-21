@@ -9,7 +9,7 @@ import (
 	"github.com/hajimehoshi/ebiten/v2/text/v2"
 )
 
-func New(ttmllines []ttml.LyricLine, screenW float64, f *text.GoTextFaceSource, fs, fd float64) (*Lyrics, error) {
+func New(ttmllines []ttml.LyricLine, screenW float64, f *text.GoTextFaceSource, fallbacks []*text.GoTextFaceSource, fs, fd float64) (*Lyrics, error) {
 	var lyrics Lyrics
 	lyrics.FD = fd
 	lyrics.anchorIndex = -1
@@ -21,6 +21,7 @@ func New(ttmllines []ttml.LyricLine, screenW float64, f *text.GoTextFaceSource, 
 			line.IsBG,
 			line.TranslatedLyric,
 			f,
+			fallbacks,
 			fs,
 		)
 		l.Position.SetW(screenW * 0.8)
@@ -41,6 +42,7 @@ func New(ttmllines []ttml.LyricLine, screenW float64, f *text.GoTextFaceSource, 
 				bgline.IsBG,
 				bgline.TranslatedLyric,
 				f,
+				fallbacks,
 				fs/1.5,
 			)
 			lbg.Position.SetW(screenW * 0.8)
@@ -66,7 +68,7 @@ func CreateSyllable(ts []ttml.LyricWord, line *Line, fd float64) error {
 		return errors.New("line is nil")
 	}
 	face := line.GetFace(false)
-	if face == nil || *face == nil {
+	if face == nil {
 		return errors.New("line face is nil")
 	}
 
@@ -89,7 +91,7 @@ func CreateSyllable(ts []ttml.LyricWord, line *Line, fd float64) error {
 				w.Word,
 				time.Duration(w.StartTime)*time.Millisecond,
 				time.Duration(w.EndTime)*time.Millisecond,
-				*face,
+				face,
 				fd,
 				color.RGBA{255, 255, 255, ap},
 				color.RGBA{255, 255, 255, 60},

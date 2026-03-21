@@ -14,7 +14,7 @@ type TextShadow struct {
 	Blur            float64
 	Margin          float64
 	Text            string
-	TextFace        *text.GoTextFaceSource
+	Face            text.Face
 	Size            float64
 	OriginImage     *ebiten.Image
 	Image           *ebiten.Image
@@ -23,15 +23,12 @@ type TextShadow struct {
 	Alpha           float64
 }
 
-func NewTextShadow(texts string, textFace *text.GoTextFaceSource, size float64) *TextShadow {
-	tw, th := text.Measure(texts, &text.GoTextFace{
-		Source: textFace,
-		Size:   size,
-	}, 1.0)
+func NewTextShadow(texts string, face text.Face, size float64) *TextShadow {
+	tw, th := text.Measure(texts, face, 1.0)
 
 	return &TextShadow{
 		Text:     texts,
-		TextFace: textFace,
+		Face:     face,
 		Color:    color.RGBA{255, 255, 255, 255},
 		Blur:     0.0,
 		Margin:   50.0,
@@ -46,7 +43,7 @@ func NewTextShadow(texts string, textFace *text.GoTextFaceSource, size float64) 
 }
 
 func (ts *TextShadow) ensureOriginImage() bool {
-	if ts == nil || ts.TextFace == nil || ts.Size <= 0 {
+	if ts == nil || ts.Face == nil || ts.Size <= 0 {
 		return false
 	}
 	if ts.OriginImage != nil {
@@ -57,10 +54,7 @@ func (ts *TextShadow) ensureOriginImage() bool {
 	op := &text.DrawOptions{}
 	op.GeoM.Translate(ts.Margin, ts.Margin)
 	op.ColorScale.ScaleWithColor(color.White)
-	text.Draw(ts.OriginImage, ts.Text, &text.GoTextFace{
-		Source: ts.TextFace,
-		Size:   ts.Size,
-	}, op)
+	text.Draw(ts.OriginImage, ts.Text, ts.Face, op)
 
 	return true
 }
@@ -107,12 +101,13 @@ func (ts *TextShadow) Draw(screen *ebiten.Image, p *Position) {
 	opt.SetX(opt.GetX() - ts.Margin - 2)
 	opt.SetY(opt.GetY() - ts.Margin - 2)
 
-	op := &ebiten.DrawImageOptions{}
-	op.GeoM = TransformToGeoM(&opt)
-	op.ColorScale.ScaleAlpha(float32(ts.Alpha))
-	op.Filter = ebiten.FilterLinear
-	op.Blend = ebiten.BlendLighter
-	screen.DrawImage(ts.Image, op)
+	drawImageResample4x4(
+		screen,
+		ts.Image,
+		TransformToGeoM(&opt),
+		float32(ts.Alpha),
+		ebiten.BlendLighter,
+	)
 }
 
 func (ts *TextShadow) Dispose() {

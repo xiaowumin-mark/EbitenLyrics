@@ -73,9 +73,10 @@ type Line struct {
 	TranslateImageW, TranslateImageH float64
 	Position                         Position // 歌词行位置和变换信息
 
-	Font     *text.GoTextFaceSource
-	fontsize float64
-	Face     *text.Face
+	Font          *text.GoTextFaceSource
+	FallbackFonts []*text.GoTextFaceSource
+	fontsize      float64
+	Face          text.Face
 
 	isShow bool
 

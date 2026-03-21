@@ -18,8 +18,8 @@ func (l *Line) GenerateTSImage() {
 	lineLayoutLayer.GenerateLineTranslateImage(l)
 }
 
-func (l *Line) SetFont(font *text.GoTextFaceSource) {
-	lineLayoutLayer.SetLineFont(l, font)
+func (l *Line) SetFont(font *text.GoTextFaceSource, fallbacks []*text.GoTextFaceSource) {
+	lineLayoutLayer.SetLineFont(l, font, fallbacks)
 }
 
 func (l *Line) SetFontSize(fontsize float64) {
@@ -118,7 +118,8 @@ func (LayoutLayer) GenerateLineTranslateImage(l *Line) {
 	if l == nil {
 		return
 	}
-	if strings.TrimSpace(l.TranslatedText) == "" || l.Font == nil {
+	translateFace := l.translatedFace()
+	if strings.TrimSpace(l.TranslatedText) == "" || translateFace == nil {
 		l.TranslateImageW = 0
 		l.TranslateImageH = 0
 		if l.TranslateImage != nil {
@@ -140,7 +141,7 @@ func (LayoutLayer) GenerateLineTranslateImage(l *Line) {
 
 	positions, h := AutoLayout(
 		l.TranslatedText,
-		&text.GoTextFace{Source: l.Font, Size: l.fontsize / 2},
+		translateFace,
 		maxWidth,
 		l.lineHeight,
 		1,
@@ -166,15 +167,17 @@ func (LayoutLayer) GenerateLineTranslateImage(l *Line) {
 		op.GeoM.Translate(pos.X, pos.Y)
 		op.ColorScale.ScaleWithColor(color.White)
 		op.ColorScale.ScaleAlpha(0.4)
-		text.Draw(l.TranslateImage, pos.Text, &text.GoTextFace{Source: l.Font, Size: l.fontsize / 2}, op)
+		text.Draw(l.TranslateImage, pos.Text, translateFace, op)
 	}
 }
 
-func (LayoutLayer) SetLineFont(l *Line, font *text.GoTextFaceSource) {
+func (LayoutLayer) SetLineFont(l *Line, font *text.GoTextFaceSource, fallbacks []*text.GoTextFaceSource) {
 	if l == nil {
 		return
 	}
 	l.Font = font
+	l.FallbackFonts = append([]*text.GoTextFaceSource{}, fallbacks...)
+	l.Face = nil
 	face := l.activeFace()
 	if face == nil {
 		return
@@ -192,6 +195,7 @@ func (LayoutLayer) SetLineFontSize(l *Line, fontsize float64) {
 		return
 	}
 	l.fontsize = fontsize
+	l.Face = nil
 	face := l.activeFace()
 	if face == nil {
 		return

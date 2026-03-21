@@ -1,0 +1,89 @@
+//kage:unit pixels
+
+package main
+
+func cubicWeight0(t float) float {
+	return (-0.5 * t) + (t * t) - (0.5 * t * t * t)
+}
+
+func cubicWeight1(t float) float {
+	return 1.0 - (2.5 * t * t) + (1.5 * t * t * t)
+}
+
+func cubicWeight2(t float) float {
+	return (0.5 * t) + (2.0 * t * t) - (1.5 * t * t * t)
+}
+
+func cubicWeight3(t float) float {
+	return (-0.5 * t * t) + (0.5 * t * t * t)
+}
+
+func sampleBicubic4x4(srcPos vec2) vec4 {
+	origin := imageSrc0Origin()
+	size := imageSrc0Size()
+	if size.x <= 0.0 || size.y <= 0.0 {
+		return vec4(0)
+	}
+
+	// Convert to source-local space and clamp to valid pixel centers.
+	local := srcPos - origin
+	minCenter := vec2(0.5)
+	maxCenter := max(vec2(0.5), size-vec2(0.5))
+	local = clamp(local, minCenter, maxCenter)
+
+	// Align to the classic bicubic footprint around the current sample point.
+	grid := local - vec2(0.5)
+	base := floor(grid) - vec2(1.0)
+	fx := fract(grid.x)
+	fy := fract(grid.y)
+
+	wx0 := cubicWeight0(fx)
+	wx1 := cubicWeight1(fx)
+	wx2 := cubicWeight2(fx)
+	wx3 := cubicWeight3(fx)
+
+	wy0 := cubicWeight0(fy)
+	wy1 := cubicWeight1(fy)
+	wy2 := cubicWeight2(fy)
+	wy3 := cubicWeight3(fy)
+
+	minSample := origin
+	maxSample := origin + size - vec2(1.0)
+
+	x0 := clamp(origin.x+base.x+0.0, minSample.x, maxSample.x)
+	x1 := clamp(origin.x+base.x+1.0, minSample.x, maxSample.x)
+	x2 := clamp(origin.x+base.x+2.0, minSample.x, maxSample.x)
+	x3 := clamp(origin.x+base.x+3.0, minSample.x, maxSample.x)
+
+	y0 := clamp(origin.y+base.y+0.0, minSample.y, maxSample.y)
+	y1 := clamp(origin.y+base.y+1.0, minSample.y, maxSample.y)
+	y2 := clamp(origin.y+base.y+2.0, minSample.y, maxSample.y)
+	y3 := clamp(origin.y+base.y+3.0, minSample.y, maxSample.y)
+
+	row0 := imageSrc0At(vec2(x0, y0))*wx0 +
+		imageSrc0At(vec2(x1, y0))*wx1 +
+		imageSrc0At(vec2(x2, y0))*wx2 +
+		imageSrc0At(vec2(x3, y0))*wx3
+	row1 := imageSrc0At(vec2(x0, y1))*wx0 +
+		imageSrc0At(vec2(x1, y1))*wx1 +
+		imageSrc0At(vec2(x2, y1))*wx2 +
+		imageSrc0At(vec2(x3, y1))*wx3
+	row2 := imageSrc0At(vec2(x0, y2))*wx0 +
+		imageSrc0At(vec2(x1, y2))*wx1 +
+		imageSrc0At(vec2(x2, y2))*wx2 +
+		imageSrc0At(vec2(x3, y2))*wx3
+	row3 := imageSrc0At(vec2(x0, y3))*wx0 +
+		imageSrc0At(vec2(x1, y3))*wx1 +
+		imageSrc0At(vec2(x2, y3))*wx2 +
+		imageSrc0At(vec2(x3, y3))*wx3
+
+	c := row0*wy0 + row1*wy1 + row2*wy2 + row3*wy3
+	c = max(c, vec4(0.0))
+	c = min(c, vec4(1.0))
+	c.rgb = min(c.rgb, vec3(c.a))
+	return c
+}
+
+func Fragment(dstPos vec4, srcPos vec2, color vec4) vec4 {
+	return sampleBicubic4x4(srcPos) * color
+}

@@ -22,6 +22,7 @@ type Game struct {
 	animMgr         *anim.Manager
 	last            time.Time
 	mplusFaceSource *text.GoTextFaceSource
+	fontFallbacks   []*text.GoTextFaceSource
 	lastW, lastH    int
 }
 
@@ -79,10 +80,12 @@ func main() {
 
 	router.Add("home", &pages.Home{
 		Font:           game.mplusFaceSource,
+		FontFallbacks:  game.fontFallbacks,
 		AnimateManager: game.animMgr,
 	})
 	router.Add("game", &pages.Game{
 		Font:           game.mplusFaceSource,
+		FontFallbacks:  game.fontFallbacks,
 		AnimateManager: game.animMgr,
 	})
 	router.Add("manage", &pages.Manage{
@@ -126,6 +129,7 @@ func initfont() {
 		log.Fatalf("failed to resolve font: %v", err)
 	}
 	game.mplusFaceSource = resolved.Source
+	game.fontFallbacks = append([]*text.GoTextFaceSource{}, resolved.Fallbacks...)
 	log.Printf(
 		"font selected: family=%q style=%q weight=%d path=%s",
 		resolved.Family,

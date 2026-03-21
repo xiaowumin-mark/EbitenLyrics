@@ -83,10 +83,5 @@ func Fragment(dstPos vec4, srcPos vec2, color vec4) vec4 {
 	result.a *= alphaVolumeFactor * color.a
 	result.rgb += vec3(dither)
 
-	dist := distance(uv, vec2(0.5))
-	vignette := smoothstep(0.8, 0.3, dist)
-	mask := 0.6 + vignette*0.4
-	result.rgb *= mask
-
 	return result
 }

@@ -10,17 +10,24 @@ import (
 )
 
 type SyllableImage struct {
-	TextMask      *ebiten.Image
-	GradientImage *ebiten.Image
-	Offset        float64
-	Width         float64
-	Height        float64
-	StartColor    color.RGBA
-	EndColor      color.RGBA
-	Fd            float64
-	Text          string
-	Font          *text.Face
-	tempImage     *ebiten.Image
+	TextMask               *ebiten.Image
+	GradientImage          *ebiten.Image
+	HighlightGradientImage *ebiten.Image
+	textMaskKey            textMaskKey
+	gradientKey            gradientKey
+	highlightGradientKey   gradientKey
+	hasTextKey             bool
+	hasGradKey             bool
+	hasHighlightGradKey    bool
+	Offset                 float64
+	Width                  float64
+	Height                 float64
+	StartColor             color.RGBA
+	EndColor               color.RGBA
+	Fd                     float64
+	Text                   string
+	Font                   *text.Face
+	tempImage              *ebiten.Image
 }
 
 func CreateSyllableImage(
@@ -157,16 +164,23 @@ func (s *SyllableImage) ensureResources() bool {
 	targetH := safeImageLength(s.Height)
 
 	if s.TextMask == nil {
-		s.TextMask = CreateTextMask(s.Text, *s.Font, s.Width, s.Height)
+		img, key := acquireTextMask(s.Text, *s.Font, s.Width, s.Height)
+		s.TextMask = img
+		s.textMaskKey = key
+		s.hasTextKey = img != nil
 	}
 	if s.GradientImage == nil {
-		s.GradientImage, s.Offset = CreateGradientImage(
-			targetW,
-			targetH,
-			s.Fd,
-			s.StartColor,
-			s.EndColor,
-		)
+		img, key := acquireGradient(targetW, targetH, s.Fd, s.StartColor, s.EndColor)
+		s.GradientImage = img
+		s.gradientKey = key
+		s.hasGradKey = img != nil
+	}
+	if s.HighlightGradientImage == nil {
+		startColor, endColor := s.highlightGradientColors()
+		img, key := acquireGradient(targetW, targetH, s.Fd, startColor, endColor)
+		s.HighlightGradientImage = img
+		s.highlightGradientKey = key
+		s.hasHighlightGradKey = img != nil
 	}
 	if s.tempImage != nil {
 		w, h := s.tempImage.Size()
@@ -179,10 +193,67 @@ func (s *SyllableImage) ensureResources() bool {
 		s.tempImage = ebiten.NewImage(targetW, targetH)
 	}
 
-	return s.TextMask != nil && s.GradientImage != nil && s.tempImage != nil
+	return s.TextMask != nil && s.GradientImage != nil && s.HighlightGradientImage != nil && s.tempImage != nil
+}
+
+func (s *SyllableImage) releaseTextMask() {
+	if s == nil {
+		return
+	}
+	if s.hasTextKey {
+		releaseTextMask(s.textMaskKey)
+	}
+	s.TextMask = nil
+	s.textMaskKey = textMaskKey{}
+	s.hasTextKey = false
+}
+
+func (s *SyllableImage) releaseGradient() {
+	if s == nil {
+		return
+	}
+	if s.hasGradKey {
+		releaseGradient(s.gradientKey)
+	}
+	s.GradientImage = nil
+	s.gradientKey = gradientKey{}
+	s.hasGradKey = false
+}
+
+func (s *SyllableImage) releaseHighlightGradient() {
+	if s == nil {
+		return
+	}
+	if s.hasHighlightGradKey {
+		releaseGradient(s.highlightGradientKey)
+	}
+	s.HighlightGradientImage = nil
+	s.highlightGradientKey = gradientKey{}
+	s.hasHighlightGradKey = false
+}
+
+func (s *SyllableImage) resetResources() {
+	if s == nil {
+		return
+	}
+	s.releaseTextMask()
+	s.releaseGradient()
+	s.releaseHighlightGradient()
+	if s.tempImage != nil {
+		s.tempImage.Deallocate()
+		s.tempImage = nil
+	}
 }
 
 func (s *SyllableImage) Draw(img *ebiten.Image, offset float64, alpha float64, pos *Position) {
+	s.drawMasked(img, s.GradientImage, offset, alpha, pos, ebiten.BlendSourceOver)
+}
+
+func (s *SyllableImage) DrawHighlight(img *ebiten.Image, offset float64, alpha float64, pos *Position) {
+	s.drawMasked(img, s.HighlightGradientImage, offset, alpha, pos, ebiten.BlendLighter)
+}
+
+func (s *SyllableImage) drawMasked(img, gradient *ebiten.Image, offset float64, alpha float64, pos *Position, blend ebiten.Blend) {
 	// Guard against transient resource disposal during hot-reload paths.
 	defer func() {
 		_ = recover()
@@ -194,6 +265,9 @@ func (s *SyllableImage) Draw(img *ebiten.Image, offset float64, alpha float64, p
 	if !s.ensureResources() {
 		return
 	}
+	if gradient == nil {
+		return
+	}
 
 	s.tempImage.Clear()
 	s.tempImage.DrawImage(s.TextMask, &ebiten.DrawImageOptions{})
@@ -203,30 +277,18 @@ func (s *SyllableImage) Draw(img *ebiten.Image, offset float64, alpha float64, p
 	op.GeoM.Translate(offset, 0)
 	op.GeoM.Scale(1, math.Max(1, s.Height))
 	op.ColorScale.ScaleAlpha(float32(alpha))
-	s.tempImage.DrawImage(s.GradientImage, op)
+	s.tempImage.DrawImage(gradient, op)
 
 	finalop := &ebiten.DrawImageOptions{}
-	finalop.Filter = ebiten.FilterLinear
 	finalop.GeoM = TransformToGeoM(pos)
-	img.DrawImage(s.tempImage, finalop)
+	drawImageResample4x4(img, s.tempImage, finalop.GeoM, 1, blend)
 }
 
 func (s *SyllableImage) Dispose() {
 	if s == nil {
 		return
 	}
-	if s.TextMask != nil {
-		s.TextMask.Deallocate()
-		s.TextMask = nil
-	}
-	if s.GradientImage != nil {
-		s.GradientImage.Deallocate()
-		s.GradientImage = nil
-	}
-	if s.tempImage != nil {
-		s.tempImage.Deallocate()
-		s.tempImage = nil
-	}
+	s.resetResources()
 }
 
 func (s *SyllableImage) GetWidth() float64 {
@@ -273,14 +335,17 @@ func (s *SyllableImage) Redraw() {
 		return
 	}
 
-	s.Dispose()
+	s.resetResources()
 	s.updateMetrics()
 	s.ensureResources()
 }
 
 func (s *SyllableImage) SetText(t string) {
+	if s.Text == t {
+		return
+	}
 	s.Text = t
-	s.Dispose()
+	s.resetResources()
 	s.updateMetrics()
 }
 
@@ -288,8 +353,11 @@ func (s *SyllableImage) SetFont(f text.Face) {
 	if s == nil {
 		return
 	}
+	if s.Font != nil && *s.Font == f {
+		return
+	}
 	s.Font = &f
-	s.Dispose()
+	s.resetResources()
 	s.updateMetrics()
 }
 
@@ -303,33 +371,34 @@ func (s *SyllableImage) rebuildGradient() {
 	_, _, _, offset := generateBackgroundFadeStyle(s.Width, s.Height, s.Fd)
 	s.Offset = offset
 
-	if s.GradientImage == nil {
-		return
-	}
-	s.GradientImage.Deallocate()
-	s.GradientImage = nil
-	s.GradientImage, s.Offset = CreateGradientImage(
-		safeImageLength(s.Width),
-		safeImageLength(s.Height),
-		s.Fd,
-		s.StartColor,
-		s.EndColor,
-	)
+	s.releaseGradient()
+	s.releaseHighlightGradient()
 }
 
 func (s *SyllableImage) SetStartColor(c color.RGBA) {
+	if s.StartColor == c {
+		return
+	}
 	s.StartColor = c
 	s.rebuildGradient()
 }
 
 func (s *SyllableImage) SetEndColor(c color.RGBA) {
+	if s.EndColor == c {
+		return
+	}
 	s.EndColor = c
 	s.rebuildGradient()
 }
 
 func (s *SyllableImage) SetFd(fd float64) {
+	if s.Fd == fd {
+		return
+	}
 	s.Fd = fd
-	s.rebuildGradient()
+	s.updateMetrics()
+	s.releaseGradient()
+	s.releaseHighlightGradient()
 }
 
 func (s *SyllableImage) GetText() string {
@@ -365,4 +434,27 @@ func (s *SyllableImage) GetGradientImage() *ebiten.Image {
 
 func (s *SyllableImage) GetTempImage() *ebiten.Image {
 	return s.tempImage
+}
+
+func (s *SyllableImage) highlightGradientColors() (color.RGBA, color.RGBA) {
+	deltaAlpha := subtractChannel(s.StartColor.A, s.EndColor.A)
+	return color.RGBA{
+			R: s.StartColor.R,
+			G: s.StartColor.G,
+			B: s.StartColor.B,
+			A: deltaAlpha,
+		},
+		color.RGBA{
+			R: s.EndColor.R,
+			G: s.EndColor.G,
+			B: s.EndColor.B,
+			A: 0,
+		}
+}
+
+func subtractChannel(a, b uint8) uint8 {
+	if a <= b {
+		return 0
+	}
+	return a - b
 }

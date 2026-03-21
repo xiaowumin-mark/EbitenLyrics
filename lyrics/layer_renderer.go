@@ -61,12 +61,13 @@ func (RendererLayer) DrawLine(l *Line, screen *ebiten.Image) {
 		l.Image.DrawImage(l.TranslateImage, op)
 	}
 
-	op := &ebiten.DrawImageOptions{}
-	op.GeoM = TransformToGeoM(l.GetPosition())
-	op.Filter = ebiten.FilterLinear
-	op.ColorScale.ScaleAlpha(float32(l.GetPosition().GetAlpha()))
-	op.Blend = ebiten.BlendLighter
-	screen.DrawImage(l.Image, op)
+	drawImageResample4x4(
+		screen,
+		l.Image,
+		TransformToGeoM(l.GetPosition()),
+		float32(l.GetPosition().GetAlpha()),
+		ebiten.BlendLighter,
+	)
 }
 
 func (RendererLayer) DisposeLine(l *Line) {

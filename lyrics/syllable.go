@@ -99,7 +99,21 @@ func (ls *LineSyllable) Draw(screen *ebiten.Image) {
 		if ele.BackgroundBlurText != nil {
 			ele.BackgroundBlurText.Draw(screen, &ele.Position)
 		}
-		ele.SyllableImage.Draw(screen, ele.NowOffset, ele.Alpha, &ele.Position)
+
+		highlightStrength := ele.Alpha
+		if highlightStrength < 0 {
+			highlightStrength = 0
+		}
+		if highlightStrength > 1 {
+			highlightStrength = 1
+		}
+
+		baseAlpha := 1 + highlightStrength*0.12
+		baseOffset := ele.SyllableImage.GetOffset()
+		ele.SyllableImage.Draw(screen, baseOffset, baseAlpha, &ele.Position)
+		if highlightStrength > 0 {
+			ele.SyllableImage.DrawHighlight(screen, ele.NowOffset, highlightStrength, &ele.Position)
+		}
 	}
 }
 
