@@ -214,7 +214,7 @@ func (LayoutLayer) ResizeLine(l *Line, width float64) {
 	if l == nil || width <= 0 {
 		return
 	}
-	l.GetPosition().SetW(width * 0.8)
+	l.GetPosition().SetW(width * 0.9)
 	if l.IsDuet {
 		l.GetPosition().SetX(width - l.GetPosition().GetW())
 	}

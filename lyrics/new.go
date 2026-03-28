@@ -259,7 +259,7 @@ func New(ttmllines []ttml.LyricLine, screenW float64, fontManager *ft.FontManage
 			fs,
 		)
 		l.RenderMode = lyrics.RenderMode
-		l.Position.SetW(screenW * 0.8)
+		l.Position.SetW(screenW * 0.9)
 		l.SetPadding(20)
 		if line.IsDuet {
 			l.Position.SetX(screenW - l.Position.GetW())
@@ -281,7 +281,7 @@ func New(ttmllines []ttml.LyricLine, screenW float64, fontManager *ft.FontManage
 				fs/1.5,
 			)
 			lbg.RenderMode = lyrics.RenderMode
-			lbg.Position.SetW(screenW * 0.8)
+			lbg.Position.SetW(screenW * 0.9)
 			lbg.SetPadding(20)
 			if bgline.IsDuet {
 				lbg.Position.SetX(screenW - lbg.Position.GetW())

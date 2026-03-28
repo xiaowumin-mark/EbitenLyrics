@@ -9,6 +9,62 @@ import (
 	"time"
 )
 
+var (
+	EaseInSine     EaseFunc = func(t float64) float64 { return 1 - math.Cos((t*math.Pi)/2) }
+	EaseOutSine    EaseFunc = func(t float64) float64 { return math.Sin((t * math.Pi) / 2) }
+	EaseInOutSine  EaseFunc = func(t float64) float64 { return -(math.Cos(math.Pi*t) - 1) / 2 }
+	EaseInCubic    EaseFunc = func(t float64) float64 { return t * t * t }
+	EaseOutCubic   EaseFunc = func(t float64) float64 { return 1 - math.Pow(1-t, 3) }
+	EaseInOutCubic EaseFunc = func(t float64) float64 {
+		if t < 0.5 {
+			return 4 * t * t * t
+		}
+		return 1 - math.Pow(-2*t+2, 3)/2
+	}
+	EaseInQuart    EaseFunc = func(t float64) float64 { return t * t * t * t }
+	EaseOutQuart   EaseFunc = func(t float64) float64 { return 1 - math.Pow(1-t, 4) }
+	EaseInOutQuart EaseFunc = func(t float64) float64 {
+		if t < 0.5 {
+			return 8 * math.Pow(t, 4)
+		}
+		return 1 - math.Pow(-2*t+2, 4)/2
+	}
+	EaseInQuint    EaseFunc = func(t float64) float64 { return t * t * t * t * t }
+	EaseOutQuint   EaseFunc = func(t float64) float64 { return 1 - math.Pow(1-t, 5) }
+	EaseInOutQuint EaseFunc = func(t float64) float64 {
+		if t < 0.5 {
+			return 16 * math.Pow(t, 5)
+		}
+		return 1 - math.Pow(-2*t+2, 5)/2
+	}
+	EaseInExpo    EaseFunc = func(t float64) float64 { return easeExpoIn(t) }
+	EaseOutExpo   EaseFunc = func(t float64) float64 { return easeExpoOut(t) }
+	EaseInOutExpo EaseFunc = func(t float64) float64 {
+		return easeExpoInOut(t)
+	}
+	EaseInCirc    EaseFunc = func(t float64) float64 { return 1 - math.Sqrt(1-math.Pow(t, 2)) }
+	EaseOutCirc   EaseFunc = func(t float64) float64 { return math.Sqrt(1 - math.Pow(t-1, 2)) }
+	EaseInOutCirc EaseFunc = func(t float64) float64 {
+		if t < 0.5 {
+			return (1 - math.Sqrt(1-math.Pow(2*t, 2))) / 2
+		}
+		return (math.Sqrt(1-math.Pow(-2*t+2, 2)) + 1) / 2
+	}
+	EaseInBack      EaseFunc = NewEaseBackIn(1.70158)
+	EaseOutBack     EaseFunc = NewEaseBackOut(1.70158)
+	EaseInOutBack   EaseFunc = NewEaseBackInOut(1.70158)
+	EaseOutBounce   EaseFunc = easeBounceOut
+	EaseInBounce    EaseFunc = func(t float64) float64 { return 1 - easeBounceOut(1-t) }
+	EaseInOutBounce EaseFunc = func(t float64) float64 {
+		if t < 0.5 {
+			return (1 - easeBounceOut(1-2*t)) / 2
+		}
+		return (1 + easeBounceOut(2*t-1)) / 2
+	}
+	SmoothStep   EaseFunc = func(t float64) float64 { return t * t * (3 - 2*t) }
+	SmootherStep EaseFunc = func(t float64) float64 { return t * t * t * (t*(t*6-15) + 10) }
+)
+
 // ================== 缓动函数 ==================
 
 type EaseFunc func(t float64) float64
@@ -101,6 +157,146 @@ func NewEaseInElastic(amplitude, period float64) EaseFunc {
 		//    这使得它的启动速度比纯 t*t 更快，感觉不那么“强”。
 		easedTime := (t + (t * t)) / 2.0
 		return baseElastic(easedTime) // <--- 修改后的代码
+	}
+}
+
+func NewEaseBackIn(overshoot float64) EaseFunc {
+	if overshoot == 0 {
+		overshoot = 1.70158
+	}
+	return func(t float64) float64 {
+		return (overshoot+1)*t*t*t - overshoot*t*t
+	}
+}
+
+func NewEaseBackOut(overshoot float64) EaseFunc {
+	if overshoot == 0 {
+		overshoot = 1.70158
+	}
+	return func(t float64) float64 {
+		u := t - 1
+		return 1 + (overshoot+1)*u*u*u + overshoot*u*u
+	}
+}
+
+func NewEaseBackInOut(overshoot float64) EaseFunc {
+	if overshoot == 0 {
+		overshoot = 1.70158
+	}
+	overshoot *= 1.525
+	return func(t float64) float64 {
+		if t < 0.5 {
+			u := 2 * t
+			return (u * u * ((overshoot+1)*u - overshoot)) / 2
+		}
+		u := 2*t - 2
+		return (u*u*((overshoot+1)*u+overshoot) + 2) / 2
+	}
+}
+
+func NewEaseSpringOut(damping, frequency float64) EaseFunc {
+	if damping <= 0 {
+		damping = 6
+	}
+	if frequency <= 0 {
+		frequency = 8
+	}
+	return func(t float64) float64 {
+		if t <= 0 {
+			return 0
+		}
+		if t >= 1 {
+			return 1
+		}
+		return 1 - math.Exp(-damping*t)*math.Cos(frequency*t)
+	}
+}
+
+func ReverseEase(base EaseFunc) EaseFunc {
+	if base == nil {
+		return Linear
+	}
+	return func(t float64) float64 {
+		return 1 - base(1-t)
+	}
+}
+
+func MirrorEase(base EaseFunc) EaseFunc {
+	if base == nil {
+		return Linear
+	}
+	return func(t float64) float64 {
+		if t < 0.5 {
+			return base(t*2) / 2
+		}
+		return 1 - base((1-t)*2)/2
+	}
+}
+
+func ChainEase(first, second EaseFunc, split float64) EaseFunc {
+	if first == nil {
+		first = Linear
+	}
+	if second == nil {
+		second = Linear
+	}
+	if split <= 0 {
+		return second
+	}
+	if split >= 1 {
+		return first
+	}
+	return func(t float64) float64 {
+		if t < split {
+			return first(t/split) * split
+		}
+		return split + second((t-split)/(1-split))*(1-split)
+	}
+}
+
+func easeExpoIn(t float64) float64 {
+	if t <= 0 {
+		return 0
+	}
+	return math.Pow(2, 10*t-10)
+}
+
+func easeExpoOut(t float64) float64 {
+	if t >= 1 {
+		return 1
+	}
+	return 1 - math.Pow(2, -10*t)
+}
+
+func easeExpoInOut(t float64) float64 {
+	if t <= 0 {
+		return 0
+	}
+	if t >= 1 {
+		return 1
+	}
+	if t < 0.5 {
+		return math.Pow(2, 20*t-10) / 2
+	}
+	return (2 - math.Pow(2, -20*t+10)) / 2
+}
+
+func easeBounceOut(t float64) float64 {
+	const n1 = 7.5625
+	const d1 = 2.75
+
+	switch {
+	case t < 1/d1:
+		return n1 * t * t
+	case t < 2/d1:
+		t -= 1.5 / d1
+		return n1*t*t + 0.75
+	case t < 2.5/d1:
+		t -= 2.25 / d1
+		return n1*t*t + 0.9375
+	default:
+		t -= 2.625 / d1
+		return n1*t*t + 0.984375
 	}
 }
 

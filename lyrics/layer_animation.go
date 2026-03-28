@@ -16,12 +16,20 @@ import (
 	"github.com/hajimehoshi/ebiten/v2"
 )
 
-var CustomElastic = anim.NewEaseInElastic(1.05, 1.5)
+var CustomElastic = anim.NewEaseInElastic(1.03, 1.7)
 
 const (
 	// maxHighlightWordRunes 限制单次高亮动画的最大字符数，避免超长词元造成夸张抖动。
 	maxHighlightWordRunes = 8
+
+	scrollFastGapThreshold = 450 * time.Millisecond
+	scrollDurationNormal   = 900 * time.Millisecond
+	scrollDurationFast     = 600 * time.Millisecond
+	scrollDelayStep        = 50 * time.Millisecond
+	scrollDelayIndexOffset = 3
 )
+
+var scrollEaseFast = anim.EaseOutQuart
 
 func (l *Lyrics) Scroll(index []int, notInit int) {
 	lineAnimationLayer.ScrollLyrics(l, index, notInit)
@@ -71,6 +79,8 @@ func (AnimationLayer) ScrollLyrics(l *Lyrics, index []int, notInit int) {
 		return
 	}
 
+	prevAnchorIndex := l.anchorIndex
+
 	if len(index) == 0 {
 		if l.anchorIndex >= 0 && l.anchorIndex < len(l.Lines) {
 			index = []int{l.anchorIndex}
@@ -87,6 +97,13 @@ func (AnimationLayer) ScrollLyrics(l *Lyrics, index []int, notInit int) {
 		index[0] = len(l.Lines) - 1
 	}
 	l.anchorIndex = index[0]
+
+	scrollDuration := scrollDurationNormal
+	scrollEase := anim.EaseFunc(CustomElastic)
+	if shouldUseFastScroll(l, prevAnchorIndex, index[0]) {
+		scrollDuration = scrollDurationFast
+		scrollEase = scrollEaseFast
+	}
 
 	activeSet := make(map[int]struct{}, len(index))
 	for _, i := range index {
@@ -163,14 +180,15 @@ func (AnimationLayer) ScrollLyrics(l *Lyrics, index []int, notInit int) {
 		if isInitialPlacement || !shouldRender || lineTravel > snapDistance {
 			line.GetPosition().SetY(targetLineY)
 		} else {
+			delay := scrollDelayForIndex(index[0], i)
 			line.ScrollAnimate = anim.NewTween(
 				uuid.NewString(),
-				1000*time.Millisecond,
-				time.Duration((math.Abs(float64(index[0]-i-3)))*50)*time.Millisecond,
+				scrollDuration,
+				delay,
 				1,
 				line.GetPosition().GetY(),
 				targetLineY,
-				CustomElastic,
+				scrollEase,
 				func(value float64) {
 					line.GetPosition().SetY(value)
 				},
@@ -189,14 +207,15 @@ func (AnimationLayer) ScrollLyrics(l *Lyrics, index []int, notInit int) {
 				bg.GetPosition().SetY(bgTargetY)
 				continue
 			}
+			delay := scrollDelayForIndex(index[0], i)
 			bg.ScrollAnimate = anim.NewTween(
 				uuid.NewString(),
-				1000*time.Millisecond,
-				time.Duration((math.Abs(float64(index[0]-i-3)))*50)*time.Millisecond,
+				scrollDuration,
+				delay,
 				1,
 				bg.GetPosition().GetY(),
 				bgTargetY,
-				CustomElastic,
+				scrollEase,
 				func(value float64) {
 					bg.GetPosition().SetY(value)
 				},
@@ -975,4 +994,27 @@ func findScrollAnchorIndexByTime(lines []*Line, t time.Duration) int {
 		return i - 1
 	}
 	return lastEnded
+}
+
+func shouldUseFastScroll(lyrics *Lyrics, currentIndex, targetIndex int) bool {
+	if lyrics == nil || currentIndex < 0 || targetIndex < 0 || currentIndex >= len(lyrics.Lines) || targetIndex >= len(lyrics.Lines) {
+		return false
+	}
+	if currentIndex == targetIndex {
+		return false
+	}
+
+	currentLine := lyrics.Lines[currentIndex]
+	targetLine := lyrics.Lines[targetIndex]
+	if currentLine == nil || targetLine == nil {
+		return false
+	}
+
+	gap := targetLine.StartTime - currentLine.EndTime
+	return gap < scrollFastGapThreshold
+}
+
+func scrollDelayForIndex(anchorIndex, lineIndex int) time.Duration {
+	offset := math.Abs(float64(anchorIndex - lineIndex - scrollDelayIndexOffset))
+	return time.Duration(offset) * scrollDelayStep
 }
