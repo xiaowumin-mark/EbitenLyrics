@@ -5,13 +5,20 @@ import (
 	"log"
 	"math"
 	"sort"
+	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
 	"github.com/hajimehoshi/ebiten/v2"
 )
 
 var CustomElastic = anim.NewEaseInElastic(1.05, 1.5)
+
+const (
+	// maxHighlightWordRunes 限制单次高亮动画的最大字符数，避免超长词元造成夸张抖动。
+	maxHighlightWordRunes = 8
+)
 
 func (l *Lyrics) Scroll(index []int, notInit int) {
 	lineAnimationLayer.ScrollLyrics(l, index, notInit)
@@ -234,7 +241,8 @@ func (AnimationLayer) UpdateLyrics(l *Lyrics, t time.Duration) {
 	changed := false
 	for i, line := range l.Lines {
 		if t >= line.StartTime && t < line.EndTime {
-			if useRealtimeOffsetFormula {
+			// 逐行模式不需要逐字扫光偏移，避免出现“进度条式”高亮。
+			if line.RenderMode != RenderModeLine && useRealtimeOffsetFormula {
 				applyRealtimeOffsets(line.OuterSyllableElements, t, l.FD)
 				for _, bgLine := range line.BackgroundLines {
 					applyRealtimeOffsets(bgLine.OuterSyllableElements, t, l.FD)
@@ -323,36 +331,68 @@ func (AnimationLayer) NormalizeLine(l *Line, lyrics *Lyrics) {
 		l.GradientColorAnimate = nil
 	}
 
-	for _, e := range l.OuterSyllableElements {
-		if e.UpAnimate != nil {
-			e.UpAnimate.Cancel()
-			e.UpAnimate = nil
+	// 逐行模式只做整行亮度渐变，不做逐字抬升还原。
+	if l.RenderMode != RenderModeLine {
+		for _, e := range l.OuterSyllableElements {
+			if e == nil {
+				continue
+			}
+			if e.UpAnimate != nil {
+				e.UpAnimate.Cancel()
+				e.UpAnimate = nil
+			}
+			e.UpAnimate = anim.NewTween(
+				uuid.NewString(),
+				600*time.Millisecond,
+				0,
+				1,
+				e.GetPosition().GetTranslateY(),
+				0,
+				anim.EaseInOut,
+				func(value float64) {
+					e.GetPosition().SetTranslateY(value)
+				},
+				func() {
+					e.GetPosition().SetTranslateY(0)
+				},
+			)
+			lyrics.AnimateManager.Add(e.UpAnimate)
 		}
-		e.UpAnimate = anim.NewTween(
-			uuid.NewString(),
-			600*time.Millisecond,
-			0,
-			1,
-			e.GetPosition().GetTranslateY(),
-			0,
-			anim.EaseInOut,
-			func(value float64) {
-				e.GetPosition().SetTranslateY(value)
-			},
-			func() {
-				e.GetPosition().SetTranslateY(0)
-			},
-		)
-		lyrics.AnimateManager.Add(e.UpAnimate)
+	} else {
+		for _, e := range l.OuterSyllableElements {
+			if e == nil {
+				continue
+			}
+			// 逐行模式下清理逐字动画残留，确保退出态不会保留局部形变或模糊。
+			if e.UpAnimate != nil {
+				e.UpAnimate.Cancel()
+				e.UpAnimate = nil
+			}
+			if e.HighlightAnimate != nil {
+				e.HighlightAnimate.Cancel()
+				e.HighlightAnimate = nil
+			}
+			if e.BackgroundBlurText != nil {
+				e.BackgroundBlurText.Dispose()
+				e.BackgroundBlurText = nil
+			}
+			e.GetPosition().SetTranslateX(0)
+			e.GetPosition().SetTranslateY(0)
+			e.GetPosition().SetScaleX(1)
+			e.GetPosition().SetScaleY(1)
+		}
 	}
 
 	currentHighlightAlpha := 0.0
 	for _, e := range l.OuterSyllableElements {
+		if e == nil {
+			continue
+		}
 		if e.Animate != nil {
 			e.Animate.Cancel()
 			e.Animate = nil
 		}
-		if e != nil && e.Alpha > currentHighlightAlpha {
+		if e.Alpha > currentHighlightAlpha {
 			currentHighlightAlpha = e.Alpha
 		}
 	}
@@ -451,11 +491,149 @@ func (AnimationLayer) LineAnimate(l *Line, lyrics *Lyrics, fd float64) {
 	}
 }
 
+func currentLineHighlightAlpha(l *Line) float64 {
+	if l == nil {
+		return 0
+	}
+	alpha := 0.0
+	for _, e := range l.OuterSyllableElements {
+		if e == nil {
+			continue
+		}
+		if e.Alpha > alpha {
+			alpha = e.Alpha
+		}
+	}
+	return alpha
+}
+
+func splitWordElementsByRuneLimit(l *Line, word []int, runeLimit int) ([][]*SyllableElement, bool) {
+	if l == nil || len(word) == 0 {
+		return nil, false
+	}
+	var all []*SyllableElement
+	totalRunes := 0
+
+	for _, idx := range word {
+		if idx < 0 || idx >= len(l.Syllables) {
+			continue
+		}
+		for _, ele := range l.Syllables[idx].Elements {
+			if ele == nil {
+				continue
+			}
+			all = append(all, ele)
+			totalRunes += utf8.RuneCountInString(strings.TrimSpace(ele.Text))
+		}
+	}
+	if len(all) == 0 {
+		return nil, false
+	}
+
+	// 关键规则：超过长度阈值的词，整词禁用高亮动画，但仍保留上升动画。
+	if runeLimit > 0 && totalRunes > runeLimit {
+		return [][]*SyllableElement{all}, false
+	}
+
+	return [][]*SyllableElement{all}, true
+}
+
+// frameAnimateLineMode 执行逐行模式动画：
+// - 不做逐字偏移动画；
+// - 不做逐词弹跳/模糊；
+// - 仅在行状态切换时做整行高亮渐入。
+func (AnimationLayer) frameAnimateLineMode(l *Line, lyrics *Lyrics) {
+	if l == nil || lyrics == nil {
+		return
+	}
+
+	if l.GradientColorAnimate != nil {
+		l.GradientColorAnimate.Cancel()
+		l.GradientColorAnimate = nil
+	}
+
+	startAlpha := currentLineHighlightAlpha(l)
+	for _, e := range l.OuterSyllableElements {
+		if e == nil {
+			continue
+		}
+		if e.Animate != nil {
+			e.Animate.Cancel()
+			e.Animate = nil
+		}
+		if e.HighlightAnimate != nil {
+			e.HighlightAnimate.Cancel()
+			e.HighlightAnimate = nil
+		}
+		if e.UpAnimate != nil {
+			e.UpAnimate.Cancel()
+			e.UpAnimate = nil
+		}
+		if e.BackgroundBlurText != nil {
+			e.BackgroundBlurText.Dispose()
+			e.BackgroundBlurText = nil
+		}
+		// 逐行模式统一重置局部变换，避免逐字动画的残留状态影响整行视觉。
+		e.GetPosition().SetTranslateX(0)
+		e.GetPosition().SetTranslateY(0)
+		e.GetPosition().SetScaleX(1)
+		e.GetPosition().SetScaleY(1)
+		// 0 偏移可让高亮梯度覆盖整块文本，配合 Alpha 实现“整行高亮”。
+		e.NowOffset = 0
+	}
+
+	if len(l.OuterSyllableElements) == 0 {
+		return
+	}
+
+	if startAlpha >= 1 {
+		for _, e := range l.OuterSyllableElements {
+			if e == nil {
+				continue
+			}
+			e.Alpha = 1
+		}
+		return
+	}
+
+	l.GradientColorAnimate = anim.NewTween(
+		uuid.NewString(),
+		320*time.Millisecond,
+		0,
+		1,
+		startAlpha,
+		1,
+		anim.EaseInOut,
+		func(value float64) {
+			for _, e := range l.OuterSyllableElements {
+				if e == nil {
+					continue
+				}
+				e.Alpha = value
+			}
+		},
+		func() {
+			for _, e := range l.OuterSyllableElements {
+				if e == nil {
+					continue
+				}
+				e.Alpha = 1
+			}
+			l.GradientColorAnimate = nil
+		},
+	)
+	lyrics.AnimateManager.Add(l.GradientColorAnimate)
+}
+
 func (AnimationLayer) FrameAnimate(l *Line, lyrics *Lyrics, fd float64) {
 	if l == nil || lyrics == nil {
 		return
 	}
 	l.Status = Hot
+	if l.RenderMode == RenderModeLine {
+		lineAnimationLayer.frameAnimateLineMode(l, lyrics)
+		return
+	}
 	if l.GradientColorAnimate != nil {
 		l.GradientColorAnimate.Cancel()
 		l.GradientColorAnimate = nil
@@ -505,85 +683,92 @@ func (AnimationLayer) FrameAnimate(l *Line, lyrics *Lyrics, fd float64) {
 	}
 
 	for _, word := range l.Participle {
-		duration := time.Duration(0)
-		for _, i := range word {
-			duration += l.Syllables[i].EndTime - l.Syllables[i].StartTime
-		}
-
-		var wordEle []*SyllableElement
-		for _, syllable := range word {
-			wordEle = append(wordEle, l.Syllables[syllable].Elements...)
-		}
-		if len(wordEle) == 0 {
-			continue
-		}
-
-		for nu, ele := range wordEle {
-			if duration >= lyrics.HighlightTime {
-				scl := adaptiveWordScale(float64(duration.Milliseconds()), l.fontsize)
-				hl := adaptiveBlurAmount(float64(duration.Milliseconds()), l.fontsize)
-				hlap := anim.MapRange(float64(duration.Milliseconds()), 800, 3000, 0.1, 1)
-
-				if ele.BackgroundBlurText == nil {
-					ele.BackgroundBlurText = NewTextShadow(ele.Text, l.activeFace(), l.fontsize)
+		// 超过长度阈值的词禁用高亮动画，但仍保留上升动画。
+		highlightChunks, allowHighlight := splitWordElementsByRuneLimit(l, word, maxHighlightWordRunes)
+		for _, wordEle := range highlightChunks {
+			duration := time.Duration(0)
+			for _, ele := range wordEle {
+				if ele == nil {
+					continue
 				}
-				ele.BackgroundBlurText.Blur = hl
+				duration += ele.EndTime - ele.StartTime
+			}
+			if len(wordEle) == 0 {
+				continue
+			}
+			if duration <= 0 {
+				// 防御：当词元时间戳缺失时，使用 chunk 首尾时间兜底。
+				duration = wordEle[len(wordEle)-1].EndTime - wordEle[0].StartTime
+				if duration < 0 {
+					duration = 0
+				}
+			}
 
-				ele.HighlightAnimate = anim.NewKeyframeAnimation(
-					uuid.NewString(),
-					duration+200*time.Millisecond,
-					wordEle[0].StartTime-lyrics.Position+duration/time.Duration(len(wordEle))*time.Duration(nu)/2,
-					1,
-					true,
-					[]anim.Keyframe{
-						{Offset: 0, Values: []float64{0, 1, 0}, Ease: nil},
-						{Offset: 0.5, Values: []float64{getScaleOffset(nu, scl, wordEle), scl, hlap}, Ease: anim.EaseOut},
-						{Offset: 1, Values: []float64{0, 1, 0}, Ease: anim.EaseInOut},
-					},
-					func(values []float64) {
-						ele.Position.SetTranslateX(values[0])
-						ele.Position.SetScaleX(values[1])
-						ele.Position.SetScaleY(values[1])
-						if ele.BackgroundBlurText != nil {
-							ele.BackgroundBlurText.Alpha = values[2]
-						}
-					},
-					func() {
-						if ele.BackgroundBlurText != nil {
-							ele.BackgroundBlurText.Dispose()
-						}
+			for nu, ele := range wordEle {
+				if duration >= lyrics.HighlightTime && allowHighlight {
+					scl := adaptiveWordScale(float64(duration.Milliseconds()), l.fontsize)
+					hl := adaptiveBlurAmount(float64(duration.Milliseconds()), l.fontsize)
+					hlap := anim.MapRange(float64(duration.Milliseconds()), 800, 3000, 0.1, 1)
+
+					if ele.BackgroundBlurText == nil {
+						ele.BackgroundBlurText = NewTextShadow(ele.Text, l.activeFace(), l.fontsize)
+					}
+					ele.BackgroundBlurText.Blur = hl
+
+					ele.HighlightAnimate = anim.NewKeyframeAnimation(
+						uuid.NewString(),
+						duration+200*time.Millisecond,
+						wordEle[0].StartTime-lyrics.Position+duration/time.Duration(len(wordEle))*time.Duration(nu)/2,
+						1,
+						true,
+						[]anim.Keyframe{
+							{Offset: 0, Values: []float64{0, 1, 0}, Ease: nil},
+							{Offset: 0.5, Values: []float64{getScaleOffset(nu, scl, wordEle), scl, hlap}, Ease: anim.EaseOut},
+							{Offset: 1, Values: []float64{0, 1, 0}, Ease: anim.EaseInOut},
+						},
+						func(values []float64) {
+							ele.Position.SetTranslateX(values[0])
+							ele.Position.SetScaleX(values[1])
+							ele.Position.SetScaleY(values[1])
+							if ele.BackgroundBlurText != nil {
+								ele.BackgroundBlurText.Alpha = values[2]
+							}
+						},
+						func() {
+							if ele.BackgroundBlurText != nil {
+								ele.BackgroundBlurText.Dispose()
+							}
+							ele.BackgroundBlurText = nil
+						},
+					)
+					lyrics.AnimateManager.Add(ele.HighlightAnimate)
+				} else {
+					// 当高亮被禁用或该词时长不足时，清理残留高亮状态。
+					if ele.HighlightAnimate != nil {
+						ele.HighlightAnimate.Cancel()
+						ele.HighlightAnimate = nil
+					}
+					if ele.BackgroundBlurText != nil {
+						ele.BackgroundBlurText.Dispose()
 						ele.BackgroundBlurText = nil
-					},
-				)
-				lyrics.AnimateManager.Add(ele.HighlightAnimate)
+					}
+				}
 
 				if ele.UpAnimate != nil {
 					ele.UpAnimate.Cancel()
 					ele.UpAnimate = nil
 				}
-				ele.UpAnimate = anim.NewTween(
-					uuid.NewString(),
-					duration+700*time.Millisecond,
-					wordEle[0].StartTime-lyrics.Position,
-					1,
-					ele.GetPosition().GetTranslateY(),
-					-adaptiveLift(l.fontsize),
-					anim.EaseOut,
-					func(value float64) {
-						ele.GetPosition().SetTranslateY(value)
-					},
-					func() {},
-				)
-				lyrics.AnimateManager.Add(ele.UpAnimate)
-			} else {
-				if ele.UpAnimate != nil {
-					ele.UpAnimate.Cancel()
-					ele.UpAnimate = nil
+
+				upDuration := ele.EndTime - ele.StartTime + 700*time.Millisecond
+				upDelay := ele.StartTime - lyrics.Position
+				if duration >= lyrics.HighlightTime {
+					upDuration = duration + 700*time.Millisecond
+					upDelay = wordEle[0].StartTime - lyrics.Position
 				}
 				ele.UpAnimate = anim.NewTween(
 					uuid.NewString(),
-					ele.EndTime-ele.StartTime+700*time.Millisecond,
-					ele.StartTime-lyrics.Position,
+					upDuration,
+					upDelay,
 					1,
 					ele.GetPosition().GetTranslateY(),
 					-adaptiveLift(l.fontsize),

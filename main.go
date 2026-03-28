@@ -26,8 +26,20 @@ type Game struct {
 	lastW, lastH    int
 }
 
+func (g *Game) currentOutsideSize() (int, int) {
+	if ebiten.IsFullscreen() {
+		if m := ebiten.Monitor(); m != nil {
+			w, h := m.Size()
+			if w > 0 && h > 0 {
+				return w, h
+			}
+		}
+	}
+	return ebiten.WindowSize()
+}
+
 func (g *Game) Update() error {
-	w, h := ebiten.WindowSize()
+	w, h := g.currentOutsideSize()
 
 	if router.NeedFirstResize() {
 		if scene := router.Current(); scene != nil {
@@ -68,8 +80,15 @@ func (g *Game) Draw(screen *ebiten.Image) {
 	}
 }
 
-func (g *Game) Layout(_, _ int) (int, int) {
-	return ebiten.WindowSize()
+func (g *Game) Layout(outsideWidth, outsideHeight int) (int, int) {
+	if outsideWidth <= 0 || outsideHeight <= 0 {
+		w, h := g.currentOutsideSize()
+		if w <= 0 || h <= 0 {
+			return 1, 1
+		}
+		return w, h
+	}
+	return outsideWidth, outsideHeight
 }
 
 func main() {

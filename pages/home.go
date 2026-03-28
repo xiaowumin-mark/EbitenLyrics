@@ -880,6 +880,9 @@ func (h *Home) Update() error {
 	if inpututil.IsKeyJustPressed(ebiten.KeyF10) {
 		h.loadAndApplyFontConfig(h.fontConfig)
 	}
+	if inpututil.IsKeyJustPressed(ebiten.KeyF11) {
+		ebiten.SetFullscreen(!ebiten.IsFullscreen())
+	}
 	if inpututil.IsKeyJustPressed(ebiten.KeyEscape) {
 		h.showDebugStats = !h.showDebugStats
 	}
@@ -907,7 +910,7 @@ func (h *Home) Draw(screen *ebiten.Image) {
 		return
 	}
 	msg := fmt.Sprintf(
-		"Home Scene\nFS:%.0f FD:%.2f\nFamily:%s\nWeight:%d Italic:%v\nScroll:%v\nF5/F6 family, F7/F8 weight, F9 italic, F10 reload config\nLowFreqVolume: %.2f",
+		"Home Scene\nFS:%.0f FD:%.2f\nFamily:%s\nWeight:%d Italic:%v\nScroll:%v\nF5/F6 family, F7/F8 weight, F9 italic, F10 reload config, F11 fullscreen\nLowFreqVolume: %.2f",
 		h.FontSize,
 		h.FD,
 		h.currentFamily,

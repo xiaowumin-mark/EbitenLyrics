@@ -8,40 +8,48 @@ import (
 	"github.com/hajimehoshi/ebiten/v2/text/v2"
 )
 
-// LineStatus 歌词状态
+// LineStatus 表示歌词行在时间轴中的状态。
 type LineStatus int
 
 const (
-	Normal   LineStatus = iota // 普通状态（不显示/已消失）
-	Hot                        // 热行（正在唱）
-	Buffered                   // 缓冲行（刚唱完，等待淡出）
+	Normal LineStatus = iota
+	Hot
+	Buffered
+)
+
+// LyricRenderMode 表示当前歌词渲染模式。
+// RenderModeSyllable: 常规逐字/逐词卡拉 OK。
+// RenderModeLine: 整行高亮模式（逐行歌词）。
+type LyricRenderMode int
+
+const (
+	RenderModeSyllable LyricRenderMode = iota
+	RenderModeLine
 )
 
 type LineSyllable struct {
-	StartTime time.Duration // 开始时间
-	EndTime   time.Duration // 结束时间
-	Syllable  string        // 音节内容
+	StartTime time.Duration
+	EndTime   time.Duration
+	Syllable  string
 
-	Elements []*SyllableElement // 音节元素列表
+	Elements []*SyllableElement
 
-	Alpha float64 // 当前透明度（用于渐变计算）
-	//Position Position // 音节位置和变换信息
+	Alpha float64
 }
 
 type SyllableElement struct {
 	Text               string
 	Position           Position
-	SyllableImage      *SyllableImage // 音节图像数据结构
-	BackgroundBlurText *TextShadow    // 背景模糊
-	NowOffset          float64        // 当前偏移位置（用于渐变计算）
-	//Offset        float64        // 偏移位置
-	Alpha     float64       // 当前透明度（用于渐变计算）
-	StartTime time.Duration // 开始时间
-	EndTime   time.Duration // 结束时间
+	SyllableImage      *SyllableImage
+	BackgroundBlurText *TextShadow
+	NowOffset          float64
+	Alpha              float64
+	StartTime          time.Duration
+	EndTime            time.Duration
 
-	SyllableIndex int // 所属的音节 反向关联 使用索引 避免使用循环指针
-
-	OuterSyllableElementsIndex int // 所属的音节 外部关联 使用索引 避免使用循环指针
+	// SyllableIndex / OuterSyllableElementsIndex 用索引避免循环引用。
+	SyllableIndex              int
+	OuterSyllableElementsIndex int
 
 	Animate          *anim.KeyframeAnimation
 	HighlightAnimate *anim.KeyframeAnimation
@@ -49,29 +57,29 @@ type SyllableElement struct {
 }
 
 type Line struct {
-	StartTime             time.Duration   // 歌词行开始时间
-	EndTime               time.Duration   // 歌词行结束时间
-	Text                  string          // 歌词行内容
-	Syllables             []*LineSyllable // 音节列表
+	StartTime             time.Duration
+	EndTime               time.Duration
+	Text                  string
+	Syllables             []*LineSyllable
 	OuterSyllableElements []*SyllableElement
-	TranslatedText        string // 翻译内容
+	TranslatedText        string
 
-	BackgroundLines []*Line // 背景歌词行
+	BackgroundLines []*Line
+	Participle      [][]int
 
-	Participle [][]int // 歌词行 participle
+	// RenderMode 由加载阶段统一判定后写入，布局和动画直接读取该值。
+	RenderMode LyricRenderMode
 
 	lineHeight float64
+	Padding    float64
 
-	Padding float64
+	IsBackground bool
+	IsDuet       bool
 
-	// 行标记
-	IsBackground bool // 是否为背景歌词行
-	IsDuet       bool // 是否为对唱行
-
-	Image                            *ebiten.Image // 渲染该行歌词的图像
-	TranslateImage                   *ebiten.Image // 渲染该行翻译歌词的图像
+	Image                            *ebiten.Image
+	TranslateImage                   *ebiten.Image
 	TranslateImageW, TranslateImageH float64
-	Position                         Position // 歌词行位置和变换信息
+	Position                         Position
 
 	Font          *text.GoTextFaceSource
 	FallbackFonts []*text.GoTextFaceSource
@@ -82,8 +90,6 @@ type Line struct {
 
 	Status LineStatus
 
-	// 动画控制器
-
 	ScrollAnimate        *anim.Tween
 	AlphaAnimate         *anim.KeyframeAnimation
 	GradientColorAnimate *anim.Tween
@@ -91,27 +97,32 @@ type Line struct {
 }
 
 type LyricMeta struct {
-	Title        []string // 歌曲标题
-	Artist       []string // 歌手信息
-	Album        []string // 专辑信息
-	NcmMusicId   []string // 网易云音乐ID
-	QQMusicId    []string // QQ音乐ID
-	SpotifyId    []string // Spotify ID
-	AppleMusicId []string // Apple Music ID
-	ISRC         []string // 国际标准录音编码
-	GitbugId     []string // GitHub ID
-	GithubUser   string   // GitHub 用户名
+	Title        []string
+	Artist       []string
+	Album        []string
+	NcmMusicId   []string
+	QQMusicId    []string
+	SpotifyId    []string
+	AppleMusicId []string
+	ISRC         []string
+	GitbugId     []string
+	GithubUser   string
 }
 
 type Lyrics struct {
-	Meta  LyricMeta // 歌词元数据
-	Lines []*Line   // 歌词行列表
+	Meta  LyricMeta
+	Lines []*Line
+
+	// RenderMode 表示整首歌词采用的渲染模式。
+	// 通过“多数行判定”得到，避免因首行特例导致误判。
+	RenderMode LyricRenderMode
 
 	Position time.Duration
 
-	nowLyrics     []int
-	renderIndex   []int
-	anchorIndex   int
+	nowLyrics   []int
+	renderIndex []int
+	anchorIndex int
+
 	Margin        float64
 	HighlightTime time.Duration
 	FD            float64
