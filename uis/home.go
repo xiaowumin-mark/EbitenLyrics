@@ -70,7 +70,7 @@ func createHeader(font *text.GoTextFaceSource) *widget.Container {
 			}),
 		),
 	)
-	f := ft.GetFace(font, 24)
+	f := ft.FaceFromSource(font, 24)
 	// 1. Logo 文本
 	c.AddChild(widget.NewText(
 		widget.TextOpts.Text("AMLL Player", &f, ColorText),
@@ -151,11 +151,11 @@ func createContent(font *text.GoTextFaceSource) *widget.Container {
 			widget.RowLayoutOpts.Spacing(5),
 		)),
 	)
-	f := ft.GetFace(font, 22)
+	f := ft.FaceFromSource(font, 22)
 	infoCol.AddChild(widget.NewText(
 		widget.TextOpts.Text("music", &f, ColorText),
 	))
-	f = ft.GetFace(font, 14)
+	f = ft.FaceFromSource(font, 14)
 	infoCol.AddChild(widget.NewText(
 		widget.TextOpts.Text("71 首歌曲 - 创建于 2025/9/13", &f, ColorTextGray),
 	))
@@ -200,11 +200,11 @@ func createFooter(font *text.GoTextFaceSource) *widget.Container {
 		widget.ContainerOpts.BackgroundImage(image.NewNineSliceColor(colornames.Purple)),
 		widget.ContainerOpts.WidgetOpts(widget.WidgetOpts.MinSize(60, 60)),
 	))
-	f := ft.GetFace(font, 16)
+	f := ft.FaceFromSource(font, 16)
 	// 歌名文字
 	textCol := widget.NewContainer(widget.ContainerOpts.Layout(widget.NewRowLayout(widget.RowLayoutOpts.Direction(widget.DirectionVertical))))
 	textCol.AddChild(widget.NewText(widget.TextOpts.Text("Zoo (From \"Zootopia\")", &f, ColorText)))
-	f = ft.GetFace(font, 12)
+	f = ft.FaceFromSource(font, 12)
 	textCol.AddChild(widget.NewText(widget.TextOpts.Text("Disney/Shakira", &f, ColorTextGray)))
 	leftInfo.AddChild(textCol)
 
@@ -248,7 +248,7 @@ func createButton(label string, font *text.GoTextFaceSource, bgColor color.Color
 	if len(textColors) > 0 {
 		txtColor = textColors[0].(color.RGBA)
 	}
-	f := ft.GetFace(font, 14)
+	f := ft.FaceFromSource(font, 14)
 	return widget.NewButton(
 		widget.ButtonOpts.WidgetOpts(widget.WidgetOpts.MinSize(40, 40)),
 		widget.ButtonOpts.Image(&widget.ButtonImage{
@@ -270,7 +270,7 @@ func createTag(label string, font *text.GoTextFaceSource, bgColor color.Color) *
 			widget.RowLayoutOpts.Padding(&widget.Insets{Top: 5, Bottom: 5, Left: 10, Right: 10}),
 		)),
 	)
-	f := ft.GetFace(font, 12)
+	f := ft.FaceFromSource(font, 12)
 	c.AddChild(widget.NewText(widget.TextOpts.Text(label, &f, ColorAccentBlue))) // 这里的字色可能要调整
 	// 简单起见，这里文字用白色
 	return widget.NewContainer(

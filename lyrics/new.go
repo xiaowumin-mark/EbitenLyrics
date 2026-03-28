@@ -4,6 +4,7 @@ package lyrics
 // 主要职责：根据 TTML 数据判断渲染模式，并初始化歌词行与音节结构。
 
 import (
+	ft "EbitenLyrics/font"
 	"EbitenLyrics/ttml"
 	"errors"
 	"image/color"
@@ -11,8 +12,6 @@ import (
 	"time"
 	"unicode"
 	"unicode/utf8"
-
-	"github.com/hajimehoshi/ebiten/v2/text/v2"
 )
 
 const (
@@ -168,7 +167,7 @@ func splitTokenByRuneLimit(token string, limit int) []string {
 //   - 这样自动换行仍然可以生效；
 //   - 动画层会按 RenderModeLine 把这些单元作为“同一整行”统一高亮，
 //     不会出现逐字扫光。
-func createLineModeSyllables(ts []ttml.LyricWord, line *Line, face text.Face, fd float64, alpha uint8) ([]*LineSyllable, error) {
+func createLineModeSyllables(ts []ttml.LyricWord, line *Line, fd float64, alpha uint8) ([]*LineSyllable, error) {
 	var syllables []*LineSyllable
 
 	for _, word := range ts {
@@ -190,7 +189,9 @@ func createLineModeSyllables(ts []ttml.LyricWord, line *Line, face text.Face, fd
 				part,
 				start,
 				end,
-				face,
+				line.FontManager,
+				line.FontRequest,
+				line.fontsize,
 				fd,
 				color.RGBA{255, 255, 255, alpha},
 				color.RGBA{255, 255, 255, 60},
@@ -217,7 +218,9 @@ func createLineModeSyllables(ts []ttml.LyricWord, line *Line, face text.Face, fd
 			" ",
 			line.StartTime,
 			line.EndTime,
-			face,
+			line.FontManager,
+			line.FontRequest,
+			line.fontsize,
 			fd,
 			color.RGBA{255, 255, 255, alpha},
 			color.RGBA{255, 255, 255, 60},
@@ -239,7 +242,7 @@ func createLineModeSyllables(ts []ttml.LyricWord, line *Line, face text.Face, fd
 	return syllables, nil
 }
 
-func New(ttmllines []ttml.LyricLine, screenW float64, f *text.GoTextFaceSource, fallbacks []*text.GoTextFaceSource, fs, fd float64) (*Lyrics, error) {
+func New(ttmllines []ttml.LyricLine, screenW float64, fontManager *ft.FontManager, req ft.FontRequest, fs, fd float64) (*Lyrics, error) {
 	var lyrics Lyrics
 	lyrics.FD = fd
 	lyrics.anchorIndex = -1
@@ -251,8 +254,8 @@ func New(ttmllines []ttml.LyricLine, screenW float64, f *text.GoTextFaceSource, 
 			line.IsDuet,
 			line.IsBG,
 			line.TranslatedLyric,
-			f,
-			fallbacks,
+			fontManager,
+			req,
 			fs,
 		)
 		l.RenderMode = lyrics.RenderMode
@@ -273,8 +276,8 @@ func New(ttmllines []ttml.LyricLine, screenW float64, f *text.GoTextFaceSource, 
 				bgline.IsDuet,
 				bgline.IsBG,
 				bgline.TranslatedLyric,
-				f,
-				fallbacks,
+				fontManager,
+				req,
 				fs/1.5,
 			)
 			lbg.RenderMode = lyrics.RenderMode
@@ -313,7 +316,7 @@ func CreateSyllable(ts []ttml.LyricWord, line *Line, fd float64) error {
 
 	// 逐行模式：先把“整句单音节”拆成布局单元，再统一做整行动画。
 	if line.RenderMode == RenderModeLine {
-		lineModeSyllables, err := createLineModeSyllables(ts, line, face, fd, ap)
+		lineModeSyllables, err := createLineModeSyllables(ts, line, fd, ap)
 		if err != nil {
 			return err
 		}
@@ -335,7 +338,9 @@ func CreateSyllable(ts []ttml.LyricWord, line *Line, fd float64) error {
 				w.Word,
 				time.Duration(w.StartTime)*time.Millisecond,
 				time.Duration(w.EndTime)*time.Millisecond,
-				face,
+				line.FontManager,
+				line.FontRequest,
+				line.fontsize,
 				fd,
 				color.RGBA{255, 255, 255, ap},
 				color.RGBA{255, 255, 255, 60},

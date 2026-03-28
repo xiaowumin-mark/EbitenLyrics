@@ -5,6 +5,7 @@ package pages
 
 import (
 	"EbitenLyrics/anim"
+	f "EbitenLyrics/font"
 	"EbitenLyrics/lyrics"
 	"EbitenLyrics/router"
 	"EbitenLyrics/ttml"
@@ -15,14 +16,13 @@ import (
 
 	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/hajimehoshi/ebiten/v2/ebitenutil"
-	"github.com/hajimehoshi/ebiten/v2/text/v2"
 )
 
 type Game struct {
 	router.BaseScene
 	AnimateManager *anim.Manager
-	Font           *text.GoTextFaceSource
-	FontFallbacks  []*text.GoTextFaceSource
+	FontManager    *f.FontManager
+	FontRequest    f.FontRequest
 	sy             *lyrics.LineSyllable
 	fontsize       float64
 
@@ -75,7 +75,7 @@ func (g *Game) OnEnter(params map[string]any) {
 	}
 
 	w, _ := ebiten.WindowSize()
-	l, err := lyrics.New(tt.LyricLines, float64(w), g.Font, g.FontFallbacks, g.fontsize, 1)
+	l, err := lyrics.New(tt.LyricLines, float64(w), g.FontManager, g.FontRequest, g.fontsize, 1)
 	if err != nil {
 		log.Printf("init lyric failed: %v", err)
 		g.lyric = nil

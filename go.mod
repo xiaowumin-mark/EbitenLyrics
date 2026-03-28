@@ -6,11 +6,13 @@ require (
 	github.com/asaskevich/EventBus v0.0.0-20200907212545-49d423059eef
 	github.com/disintegration/imaging v1.6.2
 	github.com/ebitenui/ebitenui v0.7.2
+	github.com/edsrzf/mmap-go v1.2.0
 	github.com/go-text/typesetting v0.3.2
 	github.com/go-viper/mapstructure/v2 v2.4.0
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/websocket v1.5.3
 	github.com/hajimehoshi/ebiten/v2 v2.9.4
+	github.com/hashicorp/golang-lru/v2 v2.0.7
 	github.com/tdewolff/font v0.0.0-20260314002930-9f995dac393e
 	golang.org/x/image v0.35.0
 )

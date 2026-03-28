@@ -1,18 +1,23 @@
 package font
 
-// 文件说明：字体配置加载测试。
-// 主要职责：验证相对路径、别名文件和默认路径行为。
-
 import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"golang.org/x/image/font/gofont/goregular"
 )
 
-func TestLoadResolveOptionsFromFile_ResolveRelativePath(t *testing.T) {
+func TestLoadFontRequestFromFile_ResolveRelativePath(t *testing.T) {
 	cfgDir := filepath.Join(t.TempDir(), "cfg")
-	if err := os.MkdirAll(cfgDir, 0o755); err != nil {
-		t.Fatalf("create cfg dir failed: %v", err)
+	fontDir := filepath.Join(cfgDir, "fonts")
+	if err := os.MkdirAll(fontDir, 0o755); err != nil {
+		t.Fatalf("create font dir failed: %v", err)
+	}
+
+	fontPath := filepath.Join(fontDir, "Primary.ttf")
+	if err := os.WriteFile(fontPath, goregular.TTF, 0o644); err != nil {
+		t.Fatalf("write font failed: %v", err)
 	}
 
 	cfgPath := filepath.Join(cfgDir, "font.json")
@@ -21,67 +26,56 @@ func TestLoadResolveOptionsFromFile_ResolveRelativePath(t *testing.T) {
 		t.Fatalf("write config failed: %v", err)
 	}
 
-	opts, err := LoadResolveOptionsFromFile(cfgPath, DefaultResolveOptions())
+	manager := NewFontManager(4)
+	req, err := manager.LoadRequestFromFile(cfgPath, DefaultRequest())
 	if err != nil {
 		t.Fatalf("load config failed: %v", err)
 	}
 
-	wantPath := filepath.Clean(filepath.Join(cfgDir, "fonts/Primary.ttf"))
-	if opts.Path != wantPath {
-		t.Fatalf("unexpected path: got %q want %q", opts.Path, wantPath)
+	if req.Weight != WeightBold {
+		t.Fatalf("unexpected weight: got %d want %d", req.Weight, WeightBold)
 	}
-	if opts.Weight != WeightBold {
-		t.Fatalf("unexpected weight: got %d want %d", opts.Weight, WeightBold)
+	if len(req.Families) == 0 || req.Families[0] == "" {
+		t.Fatalf("expected registered custom family alias")
+	}
+
+	chain, err := manager.ResolveChain(req)
+	if err != nil {
+		t.Fatalf("resolve chain failed: %v", err)
+	}
+	if chain.Primary == nil {
+		t.Fatalf("expected primary font")
+	}
+	if filepath.Clean(chain.Primary.Path) != filepath.Clean(fontPath) {
+		t.Fatalf("unexpected path: got %q want %q", chain.Primary.Path, fontPath)
 	}
 }
 
-func TestLoadResolveOptionsFromFile_ResolveRelativePathAliasFile(t *testing.T) {
+func TestLoadFontRequestFromFile_KeepBaseFamiliesWhenNoFamilyKey(t *testing.T) {
 	cfgDir := filepath.Join(t.TempDir(), "cfg")
 	if err := os.MkdirAll(cfgDir, 0o755); err != nil {
 		t.Fatalf("create cfg dir failed: %v", err)
 	}
 
 	cfgPath := filepath.Join(cfgDir, "font.json")
-	cfg := `{"font":{"file":"./fonts/Fallback.ttc","italic":true}}`
+	cfg := `{"font":{"italic":true}}`
 	if err := os.WriteFile(cfgPath, []byte(cfg), 0o644); err != nil {
 		t.Fatalf("write config failed: %v", err)
 	}
 
-	opts, err := LoadResolveOptionsFromFile(cfgPath, DefaultResolveOptions())
+	base := FontRequest{
+		Families: []string{"Inter"},
+		Weight:   WeightMedium,
+	}
+	req, err := NewFontManager(4).LoadRequestFromFile(cfgPath, base)
 	if err != nil {
 		t.Fatalf("load config failed: %v", err)
 	}
 
-	wantPath := filepath.Clean(filepath.Join(cfgDir, "fonts/Fallback.ttc"))
-	if opts.Path != wantPath {
-		t.Fatalf("unexpected path: got %q want %q", opts.Path, wantPath)
+	if len(req.Families) != 1 || req.Families[0] != "Inter" {
+		t.Fatalf("base families should stay unchanged: got %#v", req.Families)
 	}
-	if !opts.Italic {
-		t.Fatalf("unexpected italic: got %v want true", opts.Italic)
-	}
-}
-
-func TestLoadResolveOptionsFromFile_KeepBasePathWhenNoPathKey(t *testing.T) {
-	cfgDir := filepath.Join(t.TempDir(), "cfg")
-	if err := os.MkdirAll(cfgDir, 0o755); err != nil {
-		t.Fatalf("create cfg dir failed: %v", err)
-	}
-
-	cfgPath := filepath.Join(cfgDir, "font.json")
-	cfg := `{"font":{"family":"Noto Sans CJK SC"}}`
-	if err := os.WriteFile(cfgPath, []byte(cfg), 0o644); err != nil {
-		t.Fatalf("write config failed: %v", err)
-	}
-
-	base := DefaultResolveOptions()
-	base.Path = filepath.Clean(filepath.Join(t.TempDir(), "preset.ttf"))
-
-	opts, err := LoadResolveOptionsFromFile(cfgPath, base)
-	if err != nil {
-		t.Fatalf("load config failed: %v", err)
-	}
-
-	if opts.Path != base.Path {
-		t.Fatalf("base path should stay unchanged: got %q want %q", opts.Path, base.Path)
+	if !req.Italic {
+		t.Fatalf("unexpected italic: got %v want true", req.Italic)
 	}
 }

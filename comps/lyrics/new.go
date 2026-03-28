@@ -5,6 +5,7 @@ package LyricsComponent
 
 import (
 	"EbitenLyrics/anim"
+	ft "EbitenLyrics/font"
 	"EbitenLyrics/lyrics"
 	"EbitenLyrics/ttml"
 	"log"
@@ -14,25 +15,24 @@ import (
 	"time"
 
 	"github.com/hajimehoshi/ebiten/v2"
-	"github.com/hajimehoshi/ebiten/v2/text/v2"
 )
 
 type LyricsComponent struct {
 	LyricsControl  *lyrics.Lyrics
 	AnimateManager *anim.Manager
-	Font           *text.GoTextFaceSource
-	FallbackFonts  []*text.GoTextFaceSource
+	FontManager    *ft.FontManager
+	FontRequest    ft.FontRequest
 	Width, Height  float64
 	FontSize       float64
 	FD             float64
 	Image          *ebiten.Image
 }
 
-func NewLyricsComponent(anim *anim.Manager, f *text.GoTextFaceSource, fallbacks []*text.GoTextFaceSource, w, h, fs, fd float64) *LyricsComponent {
+func NewLyricsComponent(anim *anim.Manager, fontManager *ft.FontManager, req ft.FontRequest, w, h, fs, fd float64) *LyricsComponent {
 	return &LyricsComponent{
 		AnimateManager: anim,
-		Font:           f,
-		FallbackFonts:  append([]*text.GoTextFaceSource{}, fallbacks...),
+		FontManager:    fontManager,
+		FontRequest:    req.Normalized(),
 		Width:          w,
 		Height:         h,
 		FontSize:       fs,
@@ -73,7 +73,7 @@ func releaseLyricsMemory() {
 		releaseLyricsMemory()
 	}
 
-	control, err := lyrics.New(ls, l.Width, l.Font, l.FallbackFonts, l.FontSize, l.FD)
+	control, err := lyrics.New(ls, l.Width, l.FontManager, l.FontRequest, l.FontSize, l.FD)
 	if err != nil {
 		log.Printf("lyrics init failed: %v", err)
 		return l
@@ -106,7 +106,7 @@ func (l *LyricsComponent) SetLyrics(ls []ttml.LyricLine) *LyricsComponent {
 		l.Image = ebiten.NewImage(safeImageSize(l.Width), safeImageSize(l.Height))
 	}
 
-	control, err := lyrics.New(ls, l.Width, l.Font, l.FallbackFonts, l.FontSize, l.FD)
+	control, err := lyrics.New(ls, l.Width, l.FontManager, l.FontRequest, l.FontSize, l.FD)
 	if err != nil {
 		log.Printf("lyrics init failed: %v", err)
 		return l
@@ -150,14 +150,14 @@ func (l *LyricsComponent) SetFontSize(fs float64) *LyricsComponent {
 	return l
 }
 
-func (l *LyricsComponent) SetFont(font *text.GoTextFaceSource, fallbacks []*text.GoTextFaceSource) *LyricsComponent {
+func (l *LyricsComponent) SetFont(fontManager *ft.FontManager, req ft.FontRequest) *LyricsComponent {
 	if l.LyricsControl == nil {
 		return l
 	}
-	l.Font = font
-	l.FallbackFonts = append([]*text.GoTextFaceSource{}, fallbacks...)
+	l.FontManager = fontManager
+	l.FontRequest = req.Normalized()
 	for _, line := range l.LyricsControl.Lines {
-		line.SetFont(font, fallbacks)
+		line.SetFont(fontManager, l.FontRequest)
 	}
 	l.LyricsControl.Scroll(l.LyricsControl.GetNowLyrics(), 0)
 	return l

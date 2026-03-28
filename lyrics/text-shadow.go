@@ -5,6 +5,7 @@ package lyrics
 
 import (
 	"EbitenLyrics/filters"
+	ft "EbitenLyrics/font"
 	"image/color"
 
 	"github.com/hajimehoshi/ebiten/v2"
@@ -17,7 +18,8 @@ type TextShadow struct {
 	Blur            float64
 	Margin          float64
 	Text            string
-	Face            text.Face
+	FontManager     *ft.FontManager
+	FontRequest     ft.FontRequest
 	Size            float64
 	OriginImage     *ebiten.Image
 	Image           *ebiten.Image
@@ -26,38 +28,50 @@ type TextShadow struct {
 	Alpha           float64
 }
 
-func NewTextShadow(texts string, face text.Face, size float64) *TextShadow {
-	tw, th := text.Measure(texts, face, 1.0)
+func NewTextShadow(texts string, fontManager *ft.FontManager, req ft.FontRequest, size float64) *TextShadow {
+	var face text.Face
+	if fontManager != nil {
+		face, _ = fontManager.GetFaceForText(req, size, texts)
+	}
+	tw, th := 1.0, 1.0
+	if face != nil {
+		tw, th = text.Measure(texts, face, 1.0)
+	}
 
 	return &TextShadow{
-		Text:     texts,
-		Face:     face,
-		Color:    color.RGBA{255, 255, 255, 255},
-		Blur:     0.0,
-		Margin:   50.0,
-		TWidth:   tw,
-		THeight:  th,
-		Width:    tw + 50*2,
-		Height:   th + 50*2,
-		Size:     size,
-		Alpha:    0,
-		LastBlur: -1,
+		Text:        texts,
+		FontManager: fontManager,
+		FontRequest: req.Normalized(),
+		Color:       color.RGBA{255, 255, 255, 255},
+		Blur:        0.0,
+		Margin:      50.0,
+		TWidth:      tw,
+		THeight:     th,
+		Width:       tw + 50*2,
+		Height:      th + 50*2,
+		Size:        size,
+		Alpha:       0,
+		LastBlur:    -1,
 	}
 }
 
 func (ts *TextShadow) ensureOriginImage() bool {
-	if ts == nil || ts.Face == nil || ts.Size <= 0 {
+	if ts == nil || ts.FontManager == nil || ts.Size <= 0 {
 		return false
 	}
 	if ts.OriginImage != nil {
 		return true
+	}
+	face, err := ts.FontManager.GetFaceForText(ts.FontRequest, ts.Size, ts.Text)
+	if err != nil || face == nil {
+		return false
 	}
 
 	ts.OriginImage = ebiten.NewImage(safeImageLength(ts.Width), safeImageLength(ts.Height))
 	op := &text.DrawOptions{}
 	op.GeoM.Translate(ts.Margin, ts.Margin)
 	op.ColorScale.ScaleWithColor(color.White)
-	text.Draw(ts.OriginImage, ts.Text, ts.Face, op)
+	text.Draw(ts.OriginImage, ts.Text, face, op)
 
 	return true
 }

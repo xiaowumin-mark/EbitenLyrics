@@ -1,16 +1,13 @@
 package lyrics
 
-// 文件说明：共享图像缓存。
-// 主要职责：复用文本遮罩和渐变图，减少重复创建带来的开销。
-
 import (
+	ft "EbitenLyrics/font"
 	"image/color"
 	"math"
 	"reflect"
 	"sync"
 
 	"github.com/hajimehoshi/ebiten/v2"
-	"github.com/hajimehoshi/ebiten/v2/text/v2"
 )
 
 type imageStore struct {
@@ -40,18 +37,10 @@ type gradientKey struct {
 }
 
 type fontKey struct {
-	kind     uint8
-	source   *text.GoTextFaceSource
-	size     float64
-	faceType string
-	facePtr  uintptr
+	manager uintptr
+	request string
+	size    float64
 }
-
-const (
-	fontKeyNone uint8 = iota
-	fontKeyGoFace
-	fontKeyOther
-)
 
 var sharedImageStore = newImageStore()
 
@@ -92,45 +81,26 @@ func normalizeFloatKey(v float64) float64 {
 	return math.Round(v*scale) / scale
 }
 
-func fontKeyFromFace(face text.Face) fontKey {
-	if face == nil {
-		return fontKey{kind: fontKeyNone}
-	}
-	if gf, ok := face.(*text.GoTextFace); ok {
-		return fontKey{
-			kind:   fontKeyGoFace,
-			source: gf.Source,
-			size:   normalizeFloatKey(gf.Size),
-		}
-	}
-
-	rv := reflect.ValueOf(face)
-	if !rv.IsValid() {
-		return fontKey{kind: fontKeyNone}
-	}
-
+func fontKeyFromRequest(fontManager *ft.FontManager, req ft.FontRequest, size float64) fontKey {
+	rv := reflect.ValueOf(fontManager)
 	var ptr uintptr
-	switch rv.Kind() {
-	case reflect.Ptr, reflect.Map, reflect.Slice, reflect.Func, reflect.Chan, reflect.UnsafePointer:
-		if !rv.IsNil() {
-			ptr = rv.Pointer()
-		}
+	if rv.IsValid() && rv.Kind() == reflect.Ptr && !rv.IsNil() {
+		ptr = rv.Pointer()
 	}
-
 	return fontKey{
-		kind:     fontKeyOther,
-		faceType: rv.Type().String(),
-		facePtr:  ptr,
+		manager: ptr,
+		request: req.CacheKey(),
+		size:    normalizeFloatKey(size),
 	}
 }
 
-func (s *imageStore) acquireTextMask(text string, font text.Face, w, h float64) (*ebiten.Image, textMaskKey) {
+func (s *imageStore) acquireTextMask(text string, fontManager *ft.FontManager, req ft.FontRequest, size, w, h float64) (*ebiten.Image, textMaskKey) {
 	if text == "" {
 		text = " "
 	}
 	key := textMaskKey{
 		text: text,
-		font: fontKeyFromFace(font),
+		font: fontKeyFromRequest(fontManager, req, size),
 		w:    safeImageLength(w),
 		h:    safeImageLength(h),
 	}
@@ -140,6 +110,9 @@ func (s *imageStore) acquireTextMask(text string, font text.Face, w, h float64) 
 	if key.h < 1 {
 		key.h = 1
 	}
+	if fontManager == nil {
+		return nil, key
+	}
 
 	s.mu.Lock()
 	if entry, ok := s.textMasks[key]; ok {
@@ -148,8 +121,24 @@ func (s *imageStore) acquireTextMask(text string, font text.Face, w, h float64) 
 		s.mu.Unlock()
 		return img, key
 	}
+	s.mu.Unlock()
 
-	img := CreateTextMask(text, font, w, h)
+	face, err := fontManager.GetFaceForText(req, size, text)
+	if err != nil || face == nil {
+		return nil, key
+	}
+	img := CreateTextMask(text, face, w, h)
+
+	s.mu.Lock()
+	if entry, ok := s.textMasks[key]; ok {
+		entry.refs++
+		shared := entry.img
+		s.mu.Unlock()
+		if img != nil {
+			img.Deallocate()
+		}
+		return shared, key
+	}
 	s.textMasks[key] = &sharedImage{img: img, refs: 1}
 	s.mu.Unlock()
 
@@ -226,8 +215,8 @@ func (s *imageStore) releaseGradient(key gradientKey) {
 	}
 }
 
-func acquireTextMask(text string, font text.Face, w, h float64) (*ebiten.Image, textMaskKey) {
-	return sharedImageStore.acquireTextMask(text, font, w, h)
+func acquireTextMask(text string, fontManager *ft.FontManager, req ft.FontRequest, size, w, h float64) (*ebiten.Image, textMaskKey) {
+	return sharedImageStore.acquireTextMask(text, fontManager, req, size, w, h)
 }
 
 func releaseTextMask(key textMaskKey) {

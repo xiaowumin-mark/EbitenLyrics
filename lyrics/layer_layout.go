@@ -4,6 +4,7 @@ package lyrics
 // 主要职责：生成行图像、翻译图像并在尺寸变化时重排内容。
 
 import (
+	ft "EbitenLyrics/font"
 	"EbitenLyrics/ttml"
 	"image/color"
 	"strings"
@@ -21,8 +22,8 @@ func (l *Line) GenerateTSImage() {
 	lineLayoutLayer.GenerateLineTranslateImage(l)
 }
 
-func (l *Line) SetFont(font *text.GoTextFaceSource, fallbacks []*text.GoTextFaceSource) {
-	lineLayoutLayer.SetLineFont(l, font, fallbacks)
+func (l *Line) SetFont(fontManager *ft.FontManager, req ft.FontRequest) {
+	lineLayoutLayer.SetLineFont(l, fontManager, req)
 }
 
 func (l *Line) SetFontSize(fontsize float64) {
@@ -174,19 +175,18 @@ func (LayoutLayer) GenerateLineTranslateImage(l *Line) {
 	}
 }
 
-func (LayoutLayer) SetLineFont(l *Line, font *text.GoTextFaceSource, fallbacks []*text.GoTextFaceSource) {
+func (LayoutLayer) SetLineFont(l *Line, fontManager *ft.FontManager, req ft.FontRequest) {
 	if l == nil {
 		return
 	}
-	l.Font = font
-	l.FallbackFonts = append([]*text.GoTextFaceSource{}, fallbacks...)
-	l.Face = nil
+	l.FontManager = fontManager
+	l.FontRequest = req.Normalized()
 	face := l.activeFace()
 	if face == nil {
 		return
 	}
 	for _, syllable := range l.Syllables {
-		syllable.SetFont(face)
+		syllable.SetFont(fontManager, l.FontRequest, l.fontsize)
 	}
 	lineLayoutLayer.GenerateLineTranslateImage(l)
 	lineLayoutLayer.LayoutLine(l)
@@ -198,13 +198,12 @@ func (LayoutLayer) SetLineFontSize(l *Line, fontsize float64) {
 		return
 	}
 	l.fontsize = fontsize
-	l.Face = nil
 	face := l.activeFace()
 	if face == nil {
 		return
 	}
 	for _, syllable := range l.Syllables {
-		syllable.SetFont(face)
+		syllable.SetFont(l.FontManager, l.FontRequest, fontsize)
 	}
 	lineLayoutLayer.GenerateLineTranslateImage(l)
 	lineLayoutLayer.LayoutLine(l)

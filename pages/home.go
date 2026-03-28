@@ -27,7 +27,6 @@ import (
 	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/hajimehoshi/ebiten/v2/ebitenutil"
 	"github.com/hajimehoshi/ebiten/v2/inpututil"
-	"github.com/hajimehoshi/ebiten/v2/text/v2"
 )
 
 var runtimeWeightSteps = []f.Weight{
@@ -41,8 +40,8 @@ var runtimeWeightSteps = []f.Weight{
 
 type Home struct {
 	router.BaseScene
-	Font          *text.GoTextFaceSource
-	FontFallbacks []*text.GoTextFaceSource
+	FontManager *f.FontManager
+	FontRequest f.FontRequest
 
 	LyricsImageAnim *anim.Tween
 	AnimateManager  *anim.Manager
@@ -62,7 +61,6 @@ type Home struct {
 	familyIndex   int
 	fontWeight    f.Weight
 	fontItalic    bool
-	requireCJK    bool
 	currentFamily string
 	fontConfig    string
 
@@ -128,18 +126,6 @@ func dedupFamilies(in []string) []string {
 		out = append(out, family)
 	}
 	return out
-}
-
-func sameFontSources(a, b []*text.GoTextFaceSource) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i] != b[i] {
-			return false
-		}
-	}
-	return true
 }
 
 func normalizeRuntimeWeight(weight f.Weight) f.Weight {
@@ -343,33 +329,33 @@ func (h *Home) currentFamilyChoice() string {
 	return h.familyChoices[h.familyIndex]
 }
 
-func (h *Home) applyFontOptions(opts f.ResolveOptions) {
-	resolved, err := f.ResolveFaceSource(opts)
-	if err != nil {
+func (h *Home) applyFontRequest(req f.FontRequest) {
+	req = req.Normalized()
+	if h.FontRequest.CacheKey() == req.CacheKey() {
+		return
+	}
+
+	resolved, err := h.FontManager.ResolveChain(req)
+	if err != nil || resolved == nil || resolved.Primary == nil {
 		log.Printf("resolve runtime font failed: %v", err)
 		return
 	}
 
-	if h.Font == resolved.Source && h.currentFamily == resolved.Family && sameFontSources(h.FontFallbacks, resolved.Fallbacks) {
-		return
-	}
-
-	h.Font = resolved.Source
-	h.FontFallbacks = append([]*text.GoTextFaceSource{}, resolved.Fallbacks...)
-	h.currentFamily = resolved.Family
-	h.fontWeight = normalizeRuntimeWeight(resolved.Weight)
-	h.fontItalic = strings.Contains(strings.ToLower(resolved.Style), "italic")
-	h.setCurrentFamilyChoice(resolved.Family)
+	h.FontRequest = req
+	h.currentFamily = resolved.Primary.Family
+	h.fontWeight = normalizeRuntimeWeight(resolved.Primary.Weight)
+	h.fontItalic = resolved.Primary.Italic
+	h.setCurrentFamilyChoice(resolved.Primary.Family)
 	if h.LyricsControl != nil {
-		h.LyricsControl.SetFont(resolved.Source, resolved.Fallbacks)
+		h.LyricsControl.SetFont(h.FontManager, req)
 	}
 
 	log.Printf(
 		"runtime font applied: family=%q style=%q weight=%d path=%s",
-		resolved.Family,
-		resolved.Style,
-		resolved.Weight,
-		resolved.Path,
+		resolved.Primary.Family,
+		resolved.Primary.Style,
+		resolved.Primary.Weight,
+		resolved.Primary.Path,
 	)
 }
 
@@ -378,28 +364,25 @@ func (h *Home) applyMapFontConfig(cfg map[string]any) {
 	if baseFamilies[0] == "" {
 		baseFamilies = f.DefaultFamilies()
 	}
-	base := f.ResolveOptions{
-		Families:   baseFamilies,
-		Weight:     h.fontWeight,
-		Italic:     h.fontItalic,
-		RequireCJK: h.requireCJK,
+	base := f.FontRequest{
+		Families: baseFamilies,
+		Weight:   h.fontWeight,
+		Italic:   h.fontItalic,
 	}
 
-	opts, err := f.ParseResolveOptions(base, cfg)
+	req, err := h.FontManager.ParseRequest(base, cfg)
 	if err != nil {
 		log.Printf("invalid font config: %v", err)
 		return
 	}
 
-	h.fontWeight = opts.Weight
-	h.fontItalic = opts.Italic
-	h.requireCJK = opts.RequireCJK
-
-	if len(opts.Families) > 0 {
-		h.setCurrentFamilyChoice(opts.Families[0])
+	h.fontWeight = req.Weight
+	h.fontItalic = req.Italic
+	if len(req.Families) > 0 {
+		h.setCurrentFamilyChoice(req.Families[0])
 	}
 
-	h.applyFontOptions(opts)
+	h.applyFontRequest(req)
 }
 
 func stringsEqualFoldTrim(a, b string) bool {
@@ -412,13 +395,11 @@ func (h *Home) cycleFamily(step int) {
 	}
 	h.familyIndex = (h.familyIndex + step + len(h.familyChoices)) % len(h.familyChoices)
 
-	opts := f.ResolveOptions{
-		Families:   []string{h.currentFamilyChoice()},
-		Weight:     h.fontWeight,
-		Italic:     h.fontItalic,
-		RequireCJK: h.requireCJK,
-	}
-	h.applyFontOptions(opts)
+	h.applyFontRequest(f.FontRequest{
+		Families: []string{h.currentFamilyChoice()},
+		Weight:   h.fontWeight,
+		Italic:   h.fontItalic,
+	})
 }
 
 func (h *Home) cycleWeight(step int) {
@@ -435,24 +416,20 @@ func (h *Home) cycleWeight(step int) {
 	idx = (idx + step + len(runtimeWeightSteps)) % len(runtimeWeightSteps)
 	h.fontWeight = runtimeWeightSteps[idx]
 
-	opts := f.ResolveOptions{
-		Families:   []string{h.currentFamilyChoice()},
-		Weight:     h.fontWeight,
-		Italic:     h.fontItalic,
-		RequireCJK: h.requireCJK,
-	}
-	h.applyFontOptions(opts)
+	h.applyFontRequest(f.FontRequest{
+		Families: []string{h.currentFamilyChoice()},
+		Weight:   h.fontWeight,
+		Italic:   h.fontItalic,
+	})
 }
 
 func (h *Home) toggleItalic() {
 	h.fontItalic = !h.fontItalic
-	opts := f.ResolveOptions{
-		Families:   []string{h.currentFamilyChoice()},
-		Weight:     h.fontWeight,
-		Italic:     h.fontItalic,
-		RequireCJK: h.requireCJK,
-	}
-	h.applyFontOptions(opts)
+	h.applyFontRequest(f.FontRequest{
+		Families: []string{h.currentFamilyChoice()},
+		Weight:   h.fontWeight,
+		Italic:   h.fontItalic,
+	})
 }
 
 func (h *Home) loadAndApplyFontConfig(path string) {
@@ -461,26 +438,24 @@ func (h *Home) loadAndApplyFontConfig(path string) {
 		baseFamilies = f.DefaultFamilies()
 	}
 
-	base := f.ResolveOptions{
-		Families:   baseFamilies,
-		Weight:     h.fontWeight,
-		Italic:     h.fontItalic,
-		RequireCJK: h.requireCJK,
+	base := f.FontRequest{
+		Families: baseFamilies,
+		Weight:   h.fontWeight,
+		Italic:   h.fontItalic,
 	}
-	opts, err := f.LoadResolveOptionsFromFile(path, base)
+	req, err := h.FontManager.LoadRequestFromFile(path, base)
 	if err != nil {
 		if !errors.Is(err, os.ErrNotExist) {
 			log.Printf("load runtime font config failed: %v", err)
 		}
 		return
 	}
-	h.fontWeight = opts.Weight
-	h.fontItalic = opts.Italic
-	h.requireCJK = opts.RequireCJK
-	if len(opts.Families) > 0 {
-		h.setCurrentFamilyChoice(opts.Families[0])
+	h.fontWeight = req.Weight
+	h.fontItalic = req.Italic
+	if len(req.Families) > 0 {
+		h.setCurrentFamilyChoice(req.Families[0])
 	}
-	h.applyFontOptions(opts)
+	h.applyFontRequest(req)
 }
 
 func (h *Home) queueLyrics(lines []ttml.LyricLine) {
@@ -761,27 +736,31 @@ func (h *Home) updateCoverTransform(w, he int) {
 
 func (h *Home) OnCreate() {
 	log.Println("Home OnCreate")
+	if h.FontManager == nil {
+		h.FontManager = f.DefaultManager()
+	}
+	if len(h.FontRequest.Families) == 0 {
+		h.FontRequest = f.DefaultRequest()
+	}
 	h.showDebugStats = true
 	ww, hh := ebiten.WindowSize()
 	h.FontSize = 50
 	h.FD = 0.5
-	h.requireCJK = true
-	h.fontWeight = f.WeightMedium
-	h.fontItalic = false
+	h.fontWeight = h.FontRequest.Weight
+	h.fontItalic = h.FontRequest.Italic
 	h.currentFamily = ""
 	h.fontConfig = strings.TrimSpace(os.Getenv("EBITENLYRICS_FONT_CONFIG"))
 	if h.fontConfig == "" {
-		h.fontConfig = f.DefaultRuntimeFontConfigPath
+		h.fontConfig = f.DefaultFontConfigPath
 	}
-	if h.Font != nil {
-		meta := h.Font.Metadata()
-		h.currentFamily = meta.Family
-		h.fontWeight = normalizeRuntimeWeight(f.Weight(meta.Weight))
-		h.fontItalic = meta.Style == text.StyleItalic
+	if resolved, err := h.FontManager.ResolveChain(h.FontRequest); err == nil && resolved != nil && resolved.Primary != nil {
+		h.currentFamily = resolved.Primary.Family
+		h.fontWeight = normalizeRuntimeWeight(resolved.Primary.Weight)
+		h.fontItalic = resolved.Primary.Italic
 	}
 	h.initFamilyChoices()
 
-	h.LyricsControl = LyricsComponent.NewLyricsComponent(h.AnimateManager, h.Font, h.FontFallbacks, float64(ww), float64(hh), h.FontSize, h.FD)
+	h.LyricsControl = LyricsComponent.NewLyricsComponent(h.AnimateManager, h.FontManager, h.FontRequest, float64(ww), float64(hh), h.FontSize, h.FD)
 	h.LyricsControl.Init()
 	meshRenderer, err := bgrender.NewMeshGradientRenderer(ww, hh)
 	if err != nil {
@@ -799,8 +778,8 @@ func (h *Home) OnCreate() {
 
 func (h *Home) OnEnter(params map[string]any) {
 	log.Println("Home OnEnter", params)
-	if h.Font == nil {
-		log.Println("Home page font is nil")
+	if h.FontManager == nil {
+		log.Println("Home page font manager is nil")
 	}
 	h.meshLastTick = time.Now()
 }

@@ -5,10 +5,10 @@ package lyrics
 
 import (
 	"EbitenLyrics/anim"
+	ft "EbitenLyrics/font"
 	"time"
 
 	"github.com/hajimehoshi/ebiten/v2"
-	"github.com/hajimehoshi/ebiten/v2/text/v2"
 )
 
 // LineStatus 表示歌词行在时间轴中的状态。
@@ -84,10 +84,9 @@ type Line struct {
 	TranslateImageW, TranslateImageH float64
 	Position                         Position
 
-	Font          *text.GoTextFaceSource
-	FallbackFonts []*text.GoTextFaceSource
-	fontsize      float64
-	Face          text.Face
+	FontManager *ft.FontManager
+	FontRequest ft.FontRequest
+	fontsize    float64
 
 	isShow bool
 

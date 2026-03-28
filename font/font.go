@@ -1,18 +1,49 @@
 package font
 
-// 文件说明：字体对象的轻量封装。
-// 主要职责：按字号从字体源创建 Ebiten 文本绘制所需的 `text.Face`。
-
 import (
+	"sync"
+
 	"github.com/hajimehoshi/ebiten/v2/text/v2"
 )
 
-func GetFace(font *text.GoTextFaceSource, size float64) text.Face {
-	if font == nil || size <= 0 {
+var (
+	defaultManagerOnce sync.Once
+	defaultManagerInst *FontManager
+)
+
+func DefaultManager() *FontManager {
+	defaultManagerOnce.Do(func() {
+		defaultManagerInst = NewFontManager(16)
+	})
+	return defaultManagerInst
+}
+
+func FaceFromSource(source *text.GoTextFaceSource, size float64) text.Face {
+	if source == nil || size <= 0 {
 		return nil
 	}
 	return &text.GoTextFace{
-		Source: font,
+		Source: source,
 		Size:   size,
 	}
+}
+
+func RegisterFallback(userRules map[string][]string) {
+	DefaultManager().RegisterFallback(userRules)
+}
+
+func RegisterCustomFontPath(name, path string) error {
+	return DefaultManager().RegisterCustomFontPath(name, path)
+}
+
+func GetFace(req FontRequest, size float64) (text.Face, error) {
+	return DefaultManager().GetFace(req, size)
+}
+
+func GetFaceForText(req FontRequest, size float64, content string) (text.Face, error) {
+	return DefaultManager().GetFaceForText(req, size, content)
+}
+
+func FindFaceForRune(r rune, chain []string) (text.Face, error) {
+	return DefaultManager().FindFaceForRune(r, chain)
 }

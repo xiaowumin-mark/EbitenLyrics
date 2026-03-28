@@ -4,6 +4,7 @@ package lyrics
 // 主要职责：创建遮罩、渐变、高亮资源并按偏移量进行混合绘制。
 
 import (
+	ft "EbitenLyrics/font"
 	"errors"
 	"image/color"
 	"math"
@@ -29,18 +30,26 @@ type SyllableImage struct {
 	EndColor               color.RGBA
 	Fd                     float64
 	Text                   string
-	Font                   *text.Face
+	FontManager            *ft.FontManager
+	FontRequest            ft.FontRequest
+	FontSize               float64
 	tempImage              *ebiten.Image
 }
 
 func CreateSyllableImage(
 	syllable string,
-	font text.Face,
+	fontManager *ft.FontManager,
+	req ft.FontRequest,
+	fontSize float64,
 	fd float64,
 	startColor, endColor color.RGBA,
 ) (*SyllableImage, error) {
-	if font == nil {
-		return nil, errors.New("font is nil")
+	if fontManager == nil {
+		return nil, errors.New("font manager is nil")
+	}
+	font, err := fontManager.GetFaceForText(req, fontSize, syllable)
+	if err != nil || font == nil {
+		return nil, errors.New("font face is nil")
 	}
 
 	tw, th := text.Measure(syllable, font, 1.0)
@@ -53,14 +62,16 @@ func CreateSyllableImage(
 	_, _, _, offset := generateBackgroundFadeStyle(tw, th, fd)
 
 	return &SyllableImage{
-		Offset:     offset,
-		Width:      tw,
-		Height:     th,
-		StartColor: startColor,
-		EndColor:   endColor,
-		Fd:         fd,
-		Font:       &font,
-		Text:       syllable,
+		Offset:      offset,
+		Width:       tw,
+		Height:      th,
+		StartColor:  startColor,
+		EndColor:    endColor,
+		Fd:          fd,
+		FontManager: fontManager,
+		FontRequest: req.Normalized(),
+		FontSize:    fontSize,
+		Text:        syllable,
 	}, nil
 }
 
@@ -139,10 +150,14 @@ func CreateGradientImage(width, height int, fd float64, startColor, endColor col
 }
 
 func (s *SyllableImage) updateMetrics() {
-	if s == nil || s.Font == nil || *s.Font == nil {
+	if s == nil {
 		return
 	}
-	tw, th := text.Measure(s.Text, *s.Font, 1.0)
+	font := s.resolveFace()
+	if font == nil {
+		return
+	}
+	tw, th := text.Measure(s.Text, font, 1.0)
 	if tw <= 0 {
 		tw = 1
 	}
@@ -156,7 +171,7 @@ func (s *SyllableImage) updateMetrics() {
 }
 
 func (s *SyllableImage) ensureResources() bool {
-	if s == nil || s.Font == nil || *s.Font == nil {
+	if s == nil {
 		return false
 	}
 	if s.Width <= 0 || s.Height <= 0 {
@@ -167,7 +182,7 @@ func (s *SyllableImage) ensureResources() bool {
 	targetH := safeImageLength(s.Height)
 
 	if s.TextMask == nil {
-		img, key := acquireTextMask(s.Text, *s.Font, s.Width, s.Height)
+		img, key := acquireTextMask(s.Text, s.FontManager, s.FontRequest, s.FontSize, s.Width, s.Height)
 		s.TextMask = img
 		s.textMaskKey = key
 		s.hasTextKey = img != nil
@@ -334,7 +349,7 @@ func generateBackgroundFadeStyle(elementWidth, elementHeight, fadeRatio float64)
 }
 
 func (s *SyllableImage) Redraw() {
-	if s == nil || s.Font == nil || *s.Font == nil {
+	if s == nil {
 		return
 	}
 
@@ -352,14 +367,16 @@ func (s *SyllableImage) SetText(t string) {
 	s.updateMetrics()
 }
 
-func (s *SyllableImage) SetFont(f text.Face) {
+func (s *SyllableImage) SetFont(fontManager *ft.FontManager, req ft.FontRequest, fontSize float64) {
 	if s == nil {
 		return
 	}
-	if s.Font != nil && *s.Font == f {
+	if s.FontManager == fontManager && s.FontRequest.CacheKey() == req.CacheKey() && s.FontSize == fontSize {
 		return
 	}
-	s.Font = &f
+	s.FontManager = fontManager
+	s.FontRequest = req.Normalized()
+	s.FontSize = fontSize
 	s.resetResources()
 	s.updateMetrics()
 }
@@ -409,10 +426,7 @@ func (s *SyllableImage) GetText() string {
 }
 
 func (s *SyllableImage) GetFont() text.Face {
-	if s == nil || s.Font == nil {
-		return nil
-	}
-	return *s.Font
+	return s.resolveFace()
 }
 
 func (s *SyllableImage) GetStartColor() color.RGBA {
@@ -460,4 +474,15 @@ func subtractChannel(a, b uint8) uint8 {
 		return 0
 	}
 	return a - b
+}
+
+func (s *SyllableImage) resolveFace() text.Face {
+	if s == nil || s.FontManager == nil || s.FontSize <= 0 {
+		return nil
+	}
+	face, err := s.FontManager.GetFaceForText(s.FontRequest, s.FontSize, s.Text)
+	if err != nil {
+		return nil
+	}
+	return face
 }

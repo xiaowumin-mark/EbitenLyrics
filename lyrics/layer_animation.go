@@ -714,7 +714,7 @@ func (AnimationLayer) FrameAnimate(l *Line, lyrics *Lyrics, fd float64) {
 					hlap := anim.MapRange(float64(duration.Milliseconds()), 800, 3000, 0.1, 1)
 
 					if ele.BackgroundBlurText == nil {
-						ele.BackgroundBlurText = NewTextShadow(ele.Text, l.activeFace(), l.fontsize)
+						ele.BackgroundBlurText = NewTextShadow(ele.Text, l.FontManager, l.FontRequest, l.fontsize)
 					}
 					ele.BackgroundBlurText.Blur = hl
 

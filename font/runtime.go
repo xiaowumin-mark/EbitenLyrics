@@ -1,64 +1,73 @@
 package font
 
-// 文件说明：处理运行时传入的字体选项和环境变量覆盖。
-// 主要职责：把动态配置规范化为统一的 `ResolveOptions`。
-
 import (
 	"fmt"
 	"os"
-	"strconv"
+	"path/filepath"
 	"strings"
 )
 
-func ParseResolveOptions(base ResolveOptions, cfg map[string]any) (ResolveOptions, error) {
-	opts := base
+func (m *FontManager) ParseRequest(base FontRequest, cfg map[string]any) (FontRequest, error) {
+	req := base.Normalized()
 	if cfg == nil {
-		return opts, nil
-	}
-
-	for _, key := range []string{"path", "fontPath", "font_file", "file"} {
-		if v, ok := cfg[key]; ok {
-			if s, ok := v.(string); ok {
-				s = normalizePathInput(s)
-				if s != "" {
-					opts.Path = s
-					break
-				}
-			}
-		}
+		return req, nil
 	}
 
 	if v, ok := cfg["family"]; ok {
 		families := parseFamiliesFromAny(v)
 		if len(families) > 0 {
-			opts.Families = families
+			req.Families = families
 		}
 	}
 	if v, ok := cfg["families"]; ok {
 		families := parseFamiliesFromAny(v)
 		if len(families) > 0 {
-			opts.Families = families
+			req.Families = families
 		}
 	}
 	if v, ok := cfg["weight"]; ok {
 		w, err := normalizeWeightValue(v)
 		if err != nil {
-			return opts, err
+			return req, err
 		}
-		opts.Weight = w
+		req.Weight = w
 	}
 	if v, ok := cfg["italic"]; ok {
-		opts.Italic = normalizeBool(v, opts.Italic)
-	}
-	if v, ok := cfg["requireCJK"]; ok {
-		opts.RequireCJK = normalizeBool(v, opts.RequireCJK)
+		req.Italic = normalizeBool(v, req.Italic)
 	}
 
-	return opts, nil
+	var customPath string
+	for _, key := range []string{"path", "fontPath", "font_file", "file"} {
+		v, ok := cfg[key]
+		if !ok {
+			continue
+		}
+		s, ok := v.(string)
+		if !ok {
+			continue
+		}
+		s = normalizePathInput(s)
+		if s != "" {
+			customPath = s
+			break
+		}
+	}
+	if customPath != "" {
+		alias := fmt.Sprintf("__custom_%s__", filepath.Base(customPath))
+		if err := m.RegisterCustomFontPath(alias, customPath); err != nil {
+			return req, err
+		}
+		req.Families = append([]string{alias}, req.Families...)
+	}
+
+	return req.Normalized(), nil
 }
 
-func ApplyEnvResolveOptions(base ResolveOptions) ResolveOptions {
-	opts := base
+func ParseFontRequest(base FontRequest, cfg map[string]any) (FontRequest, error) {
+	return DefaultManager().ParseRequest(base, cfg)
+}
+
+func (m *FontManager) ApplyEnvRequest(base FontRequest) (FontRequest, error) {
 	cfg := map[string]any{}
 
 	if family := strings.TrimSpace(os.Getenv("EBITENLYRICS_FONT_FAMILY")); family != "" {
@@ -70,17 +79,15 @@ func ApplyEnvResolveOptions(base ResolveOptions) ResolveOptions {
 	if italicRaw := strings.TrimSpace(strings.ToLower(os.Getenv("EBITENLYRICS_FONT_ITALIC"))); italicRaw != "" {
 		cfg["italic"] = italicRaw
 	}
-	if requireCJKRaw := strings.TrimSpace(strings.ToLower(os.Getenv("EBITENLYRICS_FONT_REQUIRE_CJK"))); requireCJKRaw != "" {
-		cfg["requireCJK"] = requireCJKRaw
-	}
-	if parsed, err := ParseResolveOptions(opts, cfg); err == nil {
-		opts = parsed
+	if path := strings.TrimSpace(os.Getenv("EBITENLYRICS_FONT_PATH")); path != "" {
+		cfg["path"] = path
 	}
 
-	if path := strings.TrimSpace(os.Getenv("EBITENLYRICS_FONT_PATH")); path != "" {
-		opts.Path = path
-	}
-	return opts
+	return m.ParseRequest(base, cfg)
+}
+
+func ApplyEnvFontRequest(base FontRequest) (FontRequest, error) {
+	return DefaultManager().ApplyEnvRequest(base)
 }
 
 func parseFamiliesFromAny(raw any) []string {
@@ -168,7 +175,6 @@ func normalizeBool(raw any, defaultValue bool) bool {
 	case float64:
 		return v != 0
 	default:
-		_ = strconv.ErrSyntax
 		return defaultValue
 	}
 }

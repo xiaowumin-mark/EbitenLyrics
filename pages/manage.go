@@ -5,16 +5,17 @@ package pages
 
 import (
 	"EbitenLyrics/anim"
+	f "EbitenLyrics/font"
 	"EbitenLyrics/router"
 	"log"
 
 	"github.com/hajimehoshi/ebiten/v2"
-	"github.com/hajimehoshi/ebiten/v2/text/v2"
 )
 
 type Manage struct {
 	router.BaseScene
-	Font           *text.GoTextFaceSource
+	FontManager    *f.FontManager
+	FontRequest    f.FontRequest
 	AnimateManager *anim.Manager
 }
 

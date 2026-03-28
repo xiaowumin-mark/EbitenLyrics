@@ -16,17 +16,16 @@ import (
 	"time"
 
 	"github.com/hajimehoshi/ebiten/v2"
-	"github.com/hajimehoshi/ebiten/v2/text/v2"
 )
 
 var game Game
 
 type Game struct {
-	animMgr         *anim.Manager
-	last            time.Time
-	mplusFaceSource *text.GoTextFaceSource
-	fontFallbacks   []*text.GoTextFaceSource
-	lastW, lastH    int
+	animMgr      *anim.Manager
+	last         time.Time
+	fontManager  *f.FontManager
+	fontRequest  f.FontRequest
+	lastW, lastH int
 }
 
 func (g *Game) currentOutsideSize() (int, int) {
@@ -101,17 +100,18 @@ func main() {
 	game.animMgr = anim.NewManager(false)
 
 	router.Add("home", &pages.Home{
-		Font:           game.mplusFaceSource,
-		FontFallbacks:  game.fontFallbacks,
+		FontManager:    game.fontManager,
+		FontRequest:    game.fontRequest,
 		AnimateManager: game.animMgr,
 	})
 	router.Add("game", &pages.Game{
-		Font:           game.mplusFaceSource,
-		FontFallbacks:  game.fontFallbacks,
+		FontManager:    game.fontManager,
+		FontRequest:    game.fontRequest,
 		AnimateManager: game.animMgr,
 	})
 	router.Add("manage", &pages.Manage{
-		Font:           game.mplusFaceSource,
+		FontManager:    game.fontManager,
+		FontRequest:    game.fontRequest,
 		AnimateManager: game.animMgr,
 	})
 
@@ -134,29 +134,32 @@ func main() {
 }
 
 func initfont() {
-	opts := f.DefaultResolveOptions()
+	game.fontManager = f.DefaultManager()
+	req := f.DefaultRequest()
 	configPath := strings.TrimSpace(os.Getenv("EBITENLYRICS_FONT_CONFIG"))
 	if configPath == "" {
-		configPath = f.DefaultRuntimeFontConfigPath
+		configPath = f.DefaultFontConfigPath
 	}
-	if fromFile, err := f.LoadResolveOptionsFromFile(configPath, opts); err == nil {
-		opts = fromFile
+	if fromFile, err := game.fontManager.LoadRequestFromFile(configPath, req); err == nil {
+		req = fromFile
 	} else if !errors.Is(err, os.ErrNotExist) {
 		log.Printf("load font config failed: %v", err)
 	}
-	opts = f.ApplyEnvResolveOptions(opts)
-
-	resolved, err := f.ResolveFaceSource(opts)
+	req, err := game.fontManager.ApplyEnvRequest(req)
 	if err != nil {
+		log.Fatalf("failed to apply font request: %v", err)
+	}
+	game.fontRequest = req
+
+	resolved, err := game.fontManager.ResolveChain(req)
+	if err != nil || resolved == nil || resolved.Primary == nil {
 		log.Fatalf("failed to resolve font: %v", err)
 	}
-	game.mplusFaceSource = resolved.Source
-	game.fontFallbacks = append([]*text.GoTextFaceSource{}, resolved.Fallbacks...)
 	log.Printf(
 		"font selected: family=%q style=%q weight=%d path=%s",
-		resolved.Family,
-		resolved.Style,
-		resolved.Weight,
-		resolved.Path,
+		resolved.Primary.Family,
+		resolved.Primary.Style,
+		resolved.Primary.Weight,
+		resolved.Primary.Path,
 	)
 }

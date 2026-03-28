@@ -4,6 +4,7 @@ package lyrics
 // 主要职责：维护字体、图像、时间轴和行级状态。
 
 import (
+	ft "EbitenLyrics/font"
 	"math"
 	"strings"
 	"time"
@@ -12,7 +13,7 @@ import (
 	"github.com/hajimehoshi/ebiten/v2/text/v2"
 )
 
-func NewLine(st, et time.Duration, isduet, isbg bool, ts string, font *text.GoTextFaceSource, fallbacks []*text.GoTextFaceSource, fs float64) *Line {
+func NewLine(st, et time.Duration, isduet, isbg bool, ts string, fontManager *ft.FontManager, req ft.FontRequest, fs float64) *Line {
 	pos := NewPosition(0, 0, 0, 0)
 	baseScale := inactiveLineScale(fs)
 	pos.SetScaleX(baseScale)
@@ -31,83 +32,39 @@ func NewLine(st, et time.Duration, isduet, isbg bool, ts string, font *text.GoTe
 		Participle:      [][]int{},
 		fontsize:        fs,
 		isShow:          false,
-		Font:            font,
-		FallbackFonts:   append([]*text.GoTextFaceSource{}, fallbacks...),
+		FontManager:     fontManager,
+		FontRequest:     req.Normalized(),
 		Position:        pos,
 	}
 }
 
-func (l *Line) faceSources() []*text.GoTextFaceSource {
-	if l == nil {
-		return nil
-	}
-	out := make([]*text.GoTextFaceSource, 0, 1+len(l.FallbackFonts))
-	seen := map[*text.GoTextFaceSource]struct{}{}
-	if l.Font != nil {
-		out = append(out, l.Font)
-		seen[l.Font] = struct{}{}
-	}
-	for _, fallback := range l.FallbackFonts {
-		if fallback == nil {
-			continue
-		}
-		if _, ok := seen[fallback]; ok {
-			continue
-		}
-		seen[fallback] = struct{}{}
-		out = append(out, fallback)
-	}
-	return out
+func (l *Line) composeFace(size float64) text.Face {
+	return l.composeFaceForText("", size)
 }
 
-func (l *Line) composeFace(size float64) text.Face {
+func (l *Line) composeFaceForText(content string, size float64) text.Face {
 	if l == nil || size <= 0 {
 		return nil
 	}
-	sources := l.faceSources()
-	if len(sources) == 0 {
+	if l.FontManager == nil {
 		return nil
 	}
-
-	faces := make([]text.Face, 0, len(sources))
-	for _, source := range sources {
-		if source == nil {
-			continue
-		}
-		faces = append(faces, &text.GoTextFace{
-			Source: source,
-			Size:   size,
-		})
-	}
-	if len(faces) == 0 {
-		return nil
-	}
-	if len(faces) == 1 {
-		return faces[0]
-	}
-	multiFace, err := text.NewMultiFace(faces...)
+	face, err := l.FontManager.GetFaceForText(l.FontRequest, size, content)
 	if err != nil {
-		return faces[0]
+		return nil
 	}
-	return multiFace
+	return face
 }
 
 func (l *Line) activeFace() text.Face {
-	if l == nil {
-		return nil
-	}
-	if l.Face != nil {
-		return l.Face
-	}
-	l.Face = l.composeFace(l.fontsize)
-	return l.Face
+	return l.composeFaceForText(l.Text, l.fontsize)
 }
 
 func (l *Line) translatedFace() text.Face {
 	if l == nil {
 		return nil
 	}
-	return l.composeFace(l.fontsize / 2)
+	return l.composeFaceForText(l.TranslatedText, l.fontsize/2)
 }
 
 func safeImageLength(v float64) int {

@@ -4,18 +4,20 @@ package lyrics
 // 主要职责：封装单个音节的时间轴、图片资源和透明度控制。
 
 import (
+	ft "EbitenLyrics/font"
 	"image/color"
 	"time"
 
 	"github.com/hajimehoshi/ebiten/v2"
-	"github.com/hajimehoshi/ebiten/v2/text/v2"
 )
 
 func NewSyllable(
 	t string,
 	startTime,
 	endTime time.Duration,
-	font text.Face,
+	fontManager *ft.FontManager,
+	req ft.FontRequest,
+	fontSize float64,
 	fd float64,
 	startColor,
 	endColor color.RGBA,
@@ -37,7 +39,9 @@ func NewSyllable(
 		for i, ch := range chars {
 			syllableImage, err := CreateSyllableImage(
 				string(ch),
-				font,
+				fontManager,
+				req,
+				fontSize,
 				fd,
 				startColor,
 				endColor,
@@ -62,7 +66,9 @@ func NewSyllable(
 	} else {
 		syllableImage, err := CreateSyllableImage(
 			t,
-			font,
+			fontManager,
+			req,
+			fontSize,
 			fd,
 			startColor,
 			endColor,
@@ -175,13 +181,13 @@ func (ls *LineSyllable) Dispose() {
 	}
 }
 
-func (ls *LineSyllable) SetFont(f text.Face) {
+func (ls *LineSyllable) SetFont(fontManager *ft.FontManager, req ft.FontRequest, fontSize float64) {
 	lastX := 0.0
 	for _, ele := range ls.Elements {
 		if ele == nil || ele.SyllableImage == nil {
 			continue
 		}
-		ele.SyllableImage.SetFont(f)
+		ele.SyllableImage.SetFont(fontManager, req, fontSize)
 		ele.NowOffset = ele.SyllableImage.GetOffset()
 		ele.GetPosition().SetX(lastX)
 		lastX += ele.SyllableImage.GetWidth()
