@@ -1,5 +1,8 @@
 package router
 
+// 文件说明：定义场景接口以及默认空实现，统一页面生命周期约定。
+// 主要职责：让不同页面以一致的方式接入创建、进入、离开、绘制和尺寸变化流程。
+
 import (
 	"github.com/hajimehoshi/ebiten/v2"
 )

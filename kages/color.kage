@@ -1,3 +1,5 @@
+// 文件说明：颜色处理着色器。
+// 主要职责：对图像颜色进行统一调制或混合。
 // kages/color.kage
 package main
 

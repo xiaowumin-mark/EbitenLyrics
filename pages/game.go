@@ -1,5 +1,8 @@
 package pages
 
+// 文件说明：示例或调试用的游戏场景。
+// 主要职责：加载测试歌词并驱动基础渲染流程。
+
 import (
 	"EbitenLyrics/anim"
 	"EbitenLyrics/lyrics"

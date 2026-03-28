@@ -1,5 +1,8 @@
 package bgrender
 
+// 文件说明：控制点自动生成算法。
+// 主要职责：利用噪声与平滑规则生成更自然的背景形变参数。
+
 import "math"
 
 func randomRange(minV, maxV float64) float64 {

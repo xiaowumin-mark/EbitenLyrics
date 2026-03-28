@@ -1,5 +1,8 @@
 package font
 
+// 文件说明：加载运行时字体配置文件。
+// 主要职责：把 JSON 配置合并到字体解析选项中。
+
 import (
 	"encoding/json"
 	"fmt"

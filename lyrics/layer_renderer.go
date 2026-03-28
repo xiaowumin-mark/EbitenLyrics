@@ -1,5 +1,8 @@
 package lyrics
 
+// 文件说明：歌词渲染层实现。
+// 主要职责：根据当前状态把歌词行与音节绘制到目标画面。
+
 import "github.com/hajimehoshi/ebiten/v2"
 
 func (l *Line) recreateLineImage() {

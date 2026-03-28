@@ -1,3 +1,5 @@
+// 文件说明：辅助测试脚本。
+// 主要职责：用于独立验证或生成与项目相关的测试数据。
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.widgets import Button

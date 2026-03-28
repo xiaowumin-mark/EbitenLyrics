@@ -1,5 +1,8 @@
 package lyrics
 
+// 文件说明：文本阴影效果封装。
+// 主要职责：缓存阴影位图并按位置参数绘制到屏幕。
+
 import (
 	"EbitenLyrics/filters"
 	"image/color"

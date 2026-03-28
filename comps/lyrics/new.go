@@ -1,5 +1,8 @@
 package LyricsComponent
 
+// 文件说明：歌词组件入口，负责把歌词核心模块接入页面。
+// 主要职责：管理歌词对象的创建、更新、缩放、绘制与资源释放。
+
 import (
 	"EbitenLyrics/anim"
 	"EbitenLyrics/lyrics"

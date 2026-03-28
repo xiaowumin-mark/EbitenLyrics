@@ -1,5 +1,8 @@
 package ttml
 
+// 文件说明：解析 TTML 歌词文本并生成内部结构。
+// 主要职责：处理时间轴、词级节点、背景歌词与元数据提取。
+
 import (
 	"encoding/xml"
 	"errors"

@@ -1,5 +1,8 @@
 package uis
 
+// 文件说明：定义简单按钮组件的交互状态。
+// 主要职责：封装悬停、点击和边界信息，供界面层复用。
+
 import "fmt"
 
 type Button struct {

@@ -1,5 +1,8 @@
 package main
 
+// 文件说明：程序入口，负责初始化字体、场景路由和 Ebiten 主循环。
+// 主要职责：创建全局 Game 状态，并把窗口生命周期转发给当前场景。
+
 import (
 	"EbitenLyrics/anim"
 	f "EbitenLyrics/font"

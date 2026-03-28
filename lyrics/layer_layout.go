@@ -1,5 +1,8 @@
 package lyrics
 
+// 文件说明：歌词布局层实现。
+// 主要职责：生成行图像、翻译图像并在尺寸变化时重排内容。
+
 import (
 	"EbitenLyrics/ttml"
 	"image/color"

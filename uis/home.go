@@ -1,5 +1,8 @@
 package uis
 
+// 文件说明：构建主页对应的 Ebiten UI 组件树。
+// 主要职责：组织标题、内容区、页脚、按钮和标签样式。
+
 import (
 	ft "EbitenLyrics/font"
 	"image/color"

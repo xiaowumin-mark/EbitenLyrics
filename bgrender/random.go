@@ -1,5 +1,8 @@
 package bgrender
 
+// 文件说明：背景模块内部的随机数辅助函数。
+// 主要职责：集中管理随机源，避免各处重复创建。
+
 import (
 	"math/rand"
 	"sync"

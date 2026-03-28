@@ -1,5 +1,8 @@
 package lyrics
 
+// 文件说明：歌词关键帧生成与实时偏移计算。
+// 主要职责：为逐字高亮和背景歌词效果构造动画帧序列。
+
 import (
 	"EbitenLyrics/anim"
 	"math"

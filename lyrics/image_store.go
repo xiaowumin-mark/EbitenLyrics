@@ -1,5 +1,8 @@
 package lyrics
 
+// 文件说明：共享图像缓存。
+// 主要职责：复用文本遮罩和渐变图，减少重复创建带来的开销。
+
 import (
 	"image/color"
 	"math"

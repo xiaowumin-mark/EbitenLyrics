@@ -1,5 +1,8 @@
 package ws
 
+// 文件说明：把 WebSocket 收到的通用数据结构转换为歌词业务结构。
+// 主要职责：校验字段并组装 `ttml.LyricLine` 结果。
+
 import (
 	"EbitenLyrics/ttml"
 

@@ -1,5 +1,8 @@
 package font
 
+// 文件说明：处理运行时传入的字体选项和环境变量覆盖。
+// 主要职责：把动态配置规范化为统一的 `ResolveOptions`。
+
 import (
 	"fmt"
 	"os"

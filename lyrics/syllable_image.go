@@ -1,5 +1,8 @@
 package lyrics
 
+// 文件说明：音节图像资源生成与绘制实现。
+// 主要职责：创建遮罩、渐变、高亮资源并按偏移量进行混合绘制。
+
 import (
 	"errors"
 	"image/color"

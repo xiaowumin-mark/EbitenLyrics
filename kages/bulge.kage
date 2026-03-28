@@ -1,4 +1,6 @@
 //kage:unit pixels
+// 文件说明：凸起形变着色器。
+// 主要职责：对输入纹理施加局部鼓包形变。
 
 package main
 

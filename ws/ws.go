@@ -1,4 +1,7 @@
-﻿package ws
+package ws
+
+// 文件说明：处理 WebSocket 连接、消息接收和事件分发。
+// 主要职责：把外部歌词、封面和播放进度等实时数据送入程序内部。
 
 import (
 	"EbitenLyrics/evbus"

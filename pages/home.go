@@ -1,5 +1,8 @@
 package pages
 
+// 文件说明：主页场景，负责歌词展示、背景联动、调试信息和运行时交互。
+// 主要职责：接收事件、更新渲染组件、处理滚轮与字体配置热切换。
+
 import (
 	"EbitenLyrics/anim"
 	"EbitenLyrics/bgrender"

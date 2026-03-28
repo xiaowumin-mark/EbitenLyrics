@@ -1,5 +1,8 @@
 package lyrics
 
+// 文件说明：歌词对象构建入口。
+// 主要职责：根据 TTML 数据判断渲染模式，并初始化歌词行与音节结构。
+
 import (
 	"EbitenLyrics/ttml"
 	"errors"

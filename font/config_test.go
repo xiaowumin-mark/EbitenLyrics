@@ -1,5 +1,8 @@
 package font
 
+// 文件说明：字体配置加载测试。
+// 主要职责：验证相对路径、别名文件和默认路径行为。
+
 import (
 	"os"
 	"path/filepath"

@@ -1,5 +1,8 @@
 package bgrender
 
+// 文件说明：网格背景渲染器实现。
+// 主要职责：驱动控制点动画、纹理更新和最终绘制输出。
+
 import (
 	"bytes"
 	"errors"

@@ -1,5 +1,8 @@
 package lyrics
 
+// 文件说明：歌词核心数据结构定义。
+// 主要职责：声明行、音节、元素、状态和整体歌词对象的字段布局。
+
 import (
 	"EbitenLyrics/anim"
 	"time"

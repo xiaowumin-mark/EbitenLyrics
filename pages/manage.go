@@ -1,5 +1,8 @@
 package pages
 
+// 文件说明：管理页场景骨架。
+// 主要职责：承载后续管理界面或工具页面的生命周期实现。
+
 import (
 	"EbitenLyrics/anim"
 	"EbitenLyrics/router"

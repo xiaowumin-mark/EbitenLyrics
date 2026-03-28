@@ -1,5 +1,8 @@
 package lyrics
 
+// 文件说明：歌词自动布局算法。
+// 主要职责：测量文本尺寸并给出换行与排版结果。
+
 import (
 	"strings"
 	"unicode"

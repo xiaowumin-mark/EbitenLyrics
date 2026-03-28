@@ -1,4 +1,6 @@
 //kage:unit pixels
+// 文件说明：通用 UV 调试或实验着色器。
+// 主要职责：验证纹理坐标和采样效果。
 
 package main
 

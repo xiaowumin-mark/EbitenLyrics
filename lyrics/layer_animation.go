@@ -1,5 +1,8 @@
 package lyrics
 
+// 文件说明：歌词动画层实现。
+// 主要职责：处理滚动、聚焦、高亮和逐字动画的调度。
+
 import (
 	"EbitenLyrics/anim"
 	"log"

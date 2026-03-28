@@ -1,3 +1,5 @@
+// 文件说明：模糊效果着色器。
+// 主要职责：在 GPU 侧执行图像模糊采样。
 package main
 
 var TextureSize vec2

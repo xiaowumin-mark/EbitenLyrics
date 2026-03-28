@@ -1,5 +1,8 @@
 package bgrender
 
+// 文件说明：背景渲染器统一包装层。
+// 主要职责：对外暴露专辑图、音量、尺寸和暂停等控制接口。
+
 import (
 	"image"
 	"time"

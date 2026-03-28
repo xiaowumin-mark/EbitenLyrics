@@ -1,5 +1,8 @@
 package interm
 
+// 文件说明：提供中间层数据结构或工具函数。
+// 主要职责：承接外部输入与内部渲染之间的格式转换。
+
 import (
 	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/hajimehoshi/ebiten/v2/inpututil"

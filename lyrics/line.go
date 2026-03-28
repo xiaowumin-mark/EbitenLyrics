@@ -1,5 +1,8 @@
 package lyrics
 
+// 文件说明：歌词行对象的创建与基础访问逻辑。
+// 主要职责：维护字体、图像、时间轴和行级状态。
+
 import (
 	"math"
 	"strings"

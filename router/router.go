@@ -1,5 +1,8 @@
 package router
 
+// 文件说明：维护场景注册表与当前场景切换状态。
+// 主要职责：在页面切换时触发生命周期，并标记首次尺寸同步。
+
 var scenes = map[string]Scene{}
 var current Scene
 var currentName string

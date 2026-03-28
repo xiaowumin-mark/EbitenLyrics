@@ -1,5 +1,8 @@
 package ttml
 
+// 文件说明：TTML 解析相关测试。
+// 主要职责：验证解析逻辑在给定样例下的输出是否符合预期。
+
 import (
 	"encoding/json"
 	"os"

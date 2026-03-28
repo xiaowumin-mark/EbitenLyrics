@@ -1,5 +1,8 @@
 package font
 
+// 文件说明：系统字体解析核心实现。
+// 主要职责：扫描字体索引、评估字重与覆盖率，并挑选主字体及回退字体。
+
 import (
 	"bytes"
 	"encoding/binary"

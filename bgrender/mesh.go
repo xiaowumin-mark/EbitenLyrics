@@ -1,5 +1,8 @@
 package bgrender
 
+// 文件说明：双三次 Hermite 网格数据结构与采样逻辑。
+// 主要职责：生成背景变形所需的控制点、顶点和三角形索引。
+
 import (
 	"errors"
 	"math"

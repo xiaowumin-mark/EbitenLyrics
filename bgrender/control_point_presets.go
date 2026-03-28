@@ -1,5 +1,8 @@
 package bgrender
 
+// 文件说明：背景控制点预设集合。
+// 主要职责：为不同视觉效果提供可直接使用的控制点布局。
+
 type ControlPointConf struct {
 	CX int
 	CY int
