@@ -7,6 +7,7 @@ import (
 	"EbitenLyrics/anim"
 	"EbitenLyrics/bgrender"
 	LyricsComponent "EbitenLyrics/comps/lyrics"
+	"EbitenLyrics/debugpanel"
 	"EbitenLyrics/evbus"
 	f "EbitenLyrics/font"
 	"EbitenLyrics/lyrics"
@@ -25,7 +26,6 @@ import (
 	"time"
 
 	"github.com/hajimehoshi/ebiten/v2"
-	"github.com/hajimehoshi/ebiten/v2/ebitenutil"
 	"github.com/hajimehoshi/ebiten/v2/inpututil"
 )
 
@@ -87,8 +87,9 @@ type Home struct {
 	memSampleInterval time.Duration
 	memPanel          string
 
-	lastProgress   time.Duration
-	showDebugStats bool
+	lastProgress       time.Duration
+	DebugPanel         *debugpanel.Panel
+	debugInputCaptured bool
 }
 
 type lyricsDebugStats struct {
@@ -291,6 +292,20 @@ func (h *Home) updateMemoryPanel() {
 	)
 }
 
+func (h *Home) setFontSize(size float64) {
+	h.FontSize = math.Max(8, size)
+	if h.LyricsControl != nil {
+		h.LyricsControl.SetFontSize(h.FontSize)
+	}
+}
+
+func (h *Home) setFD(fd float64) {
+	h.FD = math.Max(0.0001, math.Min(3, fd))
+	if h.LyricsControl != nil {
+		h.LyricsControl.SetFD(h.FD)
+	}
+}
+
 func (h *Home) initFamilyChoices() {
 	choices := append([]string{}, f.DefaultFamilies()...)
 	if h.currentFamily != "" {
@@ -327,6 +342,47 @@ func (h *Home) currentFamilyChoice() string {
 		h.familyIndex = 0
 	}
 	return h.familyChoices[h.familyIndex]
+}
+
+func (h *Home) weightChoiceLabels() []string {
+	out := make([]string, 0, len(runtimeWeightSteps))
+	for _, weight := range runtimeWeightSteps {
+		out = append(out, fmt.Sprintf("%d", weight))
+	}
+	return out
+}
+
+func (h *Home) currentWeightChoiceIndex() int {
+	for i, weight := range runtimeWeightSteps {
+		if weight == h.fontWeight {
+			return i
+		}
+	}
+	return 0
+}
+
+func (h *Home) setWeightChoiceIndex(index int) {
+	if index < 0 || index >= len(runtimeWeightSteps) {
+		return
+	}
+	h.fontWeight = runtimeWeightSteps[index]
+	h.applyFontRequest(f.FontRequest{
+		Families: []string{h.currentFamilyChoice()},
+		Weight:   h.fontWeight,
+		Italic:   h.fontItalic,
+	})
+}
+
+func (h *Home) setFamilyChoiceIndex(index int) {
+	if index < 0 || index >= len(h.familyChoices) {
+		return
+	}
+	h.familyIndex = index
+	h.applyFontRequest(f.FontRequest{
+		Families: []string{h.currentFamilyChoice()},
+		Weight:   h.fontWeight,
+		Italic:   h.fontItalic,
+	})
 }
 
 func (h *Home) applyFontRequest(req f.FontRequest) {
@@ -456,6 +512,72 @@ func (h *Home) loadAndApplyFontConfig(path string) {
 		h.setCurrentFamilyChoice(req.Families[0])
 	}
 	h.applyFontRequest(req)
+}
+
+func (h *Home) debugSummaryText() string {
+	lines := []string{
+		fmt.Sprintf("Family: %s", h.currentFamily),
+		fmt.Sprintf("Weight: %d", h.fontWeight),
+		fmt.Sprintf("Italic: %v", h.fontItalic),
+		fmt.Sprintf("User Scroll: %v", h.isUserScrolling),
+		fmt.Sprintf("LowFreqVolume: %.2f", h.pendingLowFreqVolume),
+		"Shortcuts: Esc toggle panel, F5/F6 family, F7/F8 weight, F9 italic, F10 reload config, F11 fullscreen",
+	}
+	return strings.Join(lines, "\n")
+}
+
+func (h *Home) setupDebugPanel() {
+	panel := debugpanel.New("Home Debug", image.Rect(18, 18, 360, 560))
+
+	panel.Group("Lyrics", true).
+		Description("Runtime tuning for lyric layout and movement.").
+		Float("Font Size", &h.FontSize, 8, 120, 1, 0, func(value float64) {
+			h.setFontSize(value)
+		}).
+		Float("FD", &h.FD, 0.0001, 3, 0.01, 2, func(value float64) {
+			h.setFD(value)
+		})
+
+	panel.Group("Font", true).
+		Select("Family", func() []string {
+			return h.familyChoices
+		}, func() int {
+			return h.familyIndex
+		}, func(index int) {
+			h.setFamilyChoiceIndex(index)
+		}).
+		Select("Weight", func() []string {
+			return h.weightChoiceLabels()
+		}, func() int {
+			return h.currentWeightChoiceIndex()
+		}, func(index int) {
+			h.setWeightChoiceIndex(index)
+		}).
+		Bool("Italic", &h.fontItalic, func(value bool) {
+			h.applyFontRequest(f.FontRequest{
+				Families: []string{h.currentFamilyChoice()},
+				Weight:   h.fontWeight,
+				Italic:   value,
+			})
+		}).
+		Action("Reload Font Config", func() {
+			h.loadAndApplyFontConfig(h.fontConfig)
+		})
+
+	panel.Group("Window", false).
+		Action("Toggle Fullscreen", func() {
+			ebiten.SetFullscreen(!ebiten.IsFullscreen())
+		})
+
+	panel.Group("Stats", true).
+		Text("", func() string {
+			return h.debugSummaryText()
+		}).
+		Text("Memory", func() string {
+			return h.memPanel
+		})
+
+	h.DebugPanel = panel
 }
 
 func (h *Home) queueLyrics(lines []ttml.LyricLine) {
@@ -742,7 +864,6 @@ func (h *Home) OnCreate() {
 	if len(h.FontRequest.Families) == 0 {
 		h.FontRequest = f.DefaultRequest()
 	}
-	h.showDebugStats = true
 	ww, hh := ebiten.WindowSize()
 	h.FontSize = 50
 	h.FD = 0.5
@@ -771,6 +892,7 @@ func (h *Home) OnCreate() {
 	h.CoverPosition = lyrics.NewPosition(0, 0, 0, 0)
 	h.memSampleInterval = 500 * time.Millisecond
 	h.updateMemoryPanel()
+	h.setupDebugPanel()
 	h.bindEvents()
 
 	h.loadAndApplyFontConfig(h.fontConfig)
@@ -812,8 +934,22 @@ func (h *Home) Update() error {
 	dt := now.Sub(h.meshLastTick)
 	h.meshLastTick = now
 
+	if inpututil.IsKeyJustPressed(ebiten.KeyEscape) && h.DebugPanel != nil {
+		h.DebugPanel.Toggle()
+	}
+
 	h.applyPendingEvents()
-	h.handleWheelScroll()
+	h.debugInputCaptured = false
+	if h.DebugPanel != nil {
+		captured, err := h.DebugPanel.Update()
+		if err != nil {
+			return err
+		}
+		h.debugInputCaptured = captured
+	}
+	if !h.debugInputCaptured {
+		h.handleWheelScroll()
+	}
 	if h.MeshRenderer != nil {
 		h.MeshRenderer.Update(dt)
 	}
@@ -823,50 +959,43 @@ func (h *Home) Update() error {
 		h.CoverPosition.Rotate = 0
 	}
 
-	if inpututil.IsKeyJustPressed(ebiten.KeyUp) {
-		h.FontSize = math.Max(8, h.FontSize+4)
-		h.LyricsControl.SetFontSize(h.FontSize)
+	if !h.debugInputCaptured && inpututil.IsKeyJustPressed(ebiten.KeyUp) {
+		h.setFontSize(h.FontSize + 4)
 		log.Println("FontSize:", h.FontSize)
 	}
-	if inpututil.IsKeyJustPressed(ebiten.KeyDown) {
-		h.FontSize = math.Max(8, h.FontSize-4)
-		h.LyricsControl.SetFontSize(h.FontSize)
+	if !h.debugInputCaptured && inpututil.IsKeyJustPressed(ebiten.KeyDown) {
+		h.setFontSize(h.FontSize - 4)
 		log.Println("FontSize:", h.FontSize)
 	}
-	if inpututil.IsKeyJustPressed(ebiten.KeyRight) {
-		h.FD = math.Min(3, h.FD+0.1)
-		h.LyricsControl.SetFD(h.FD)
+	if !h.debugInputCaptured && inpututil.IsKeyJustPressed(ebiten.KeyRight) {
+		h.setFD(h.FD + 0.1)
 		log.Println("FD:", h.FD)
 	}
-	if inpututil.IsKeyJustPressed(ebiten.KeyLeft) {
-		h.FD = math.Max(0.0001, h.FD-0.1)
-		h.LyricsControl.SetFD(h.FD)
+	if !h.debugInputCaptured && inpututil.IsKeyJustPressed(ebiten.KeyLeft) {
+		h.setFD(h.FD - 0.1)
 		log.Println("FD:", h.FD)
 	}
 
-	if inpututil.IsKeyJustPressed(ebiten.KeyF6) {
+	if !h.debugInputCaptured && inpututil.IsKeyJustPressed(ebiten.KeyF6) {
 		h.cycleFamily(1)
 	}
-	if inpututil.IsKeyJustPressed(ebiten.KeyF5) {
+	if !h.debugInputCaptured && inpututil.IsKeyJustPressed(ebiten.KeyF5) {
 		h.cycleFamily(-1)
 	}
-	if inpututil.IsKeyJustPressed(ebiten.KeyF8) {
+	if !h.debugInputCaptured && inpututil.IsKeyJustPressed(ebiten.KeyF8) {
 		h.cycleWeight(1)
 	}
-	if inpututil.IsKeyJustPressed(ebiten.KeyF7) {
+	if !h.debugInputCaptured && inpututil.IsKeyJustPressed(ebiten.KeyF7) {
 		h.cycleWeight(-1)
 	}
-	if inpututil.IsKeyJustPressed(ebiten.KeyF9) {
+	if !h.debugInputCaptured && inpututil.IsKeyJustPressed(ebiten.KeyF9) {
 		h.toggleItalic()
 	}
-	if inpututil.IsKeyJustPressed(ebiten.KeyF10) {
+	if !h.debugInputCaptured && inpututil.IsKeyJustPressed(ebiten.KeyF10) {
 		h.loadAndApplyFontConfig(h.fontConfig)
 	}
-	if inpututil.IsKeyJustPressed(ebiten.KeyF11) {
+	if !h.debugInputCaptured && inpututil.IsKeyJustPressed(ebiten.KeyF11) {
 		ebiten.SetFullscreen(!ebiten.IsFullscreen())
-	}
-	if inpututil.IsKeyJustPressed(ebiten.KeyEscape) {
-		h.showDebugStats = !h.showDebugStats
 	}
 
 	h.updateMemoryPanel()
@@ -888,23 +1017,9 @@ func (h *Home) Draw(screen *ebiten.Image) {
 		pos.SetTranslateY(h.manualScrollOffset)
 		h.LyricsControl.Draw(screen, &pos)
 	}
-	if h.showDebugStats {
-		return
+	if h.DebugPanel != nil {
+		h.DebugPanel.Draw(screen)
 	}
-	msg := fmt.Sprintf(
-		"Home Scene\nFS:%.0f FD:%.2f\nFamily:%s\nWeight:%d Italic:%v\nScroll:%v\nF5/F6 family, F7/F8 weight, F9 italic, F10 reload config, F11 fullscreen\nLowFreqVolume: %.2f",
-		h.FontSize,
-		h.FD,
-		h.currentFamily,
-		h.fontWeight,
-		h.fontItalic,
-		h.isUserScrolling,
-		h.pendingLowFreqVolume,
-	)
-	if h.memPanel != "" {
-		msg += "\n" + h.memPanel
-	}
-	ebitenutil.DebugPrint(screen, msg)
 }
 
 func (h *Home) OnResize(w, he int, isFirst bool) {

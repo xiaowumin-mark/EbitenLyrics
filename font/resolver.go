@@ -23,6 +23,11 @@ import (
 
 const lastResortFamily = "__font_last_resort__"
 
+const (
+	glyphSupportCacheSize     = 16384
+	contentSelectionCacheSize = 1024
+)
+
 type fontRecord struct {
 	Path            string
 	CollectionIndex int
@@ -90,6 +95,16 @@ type loadedFontFile struct {
 	sources []*text.GoTextFaceSource
 }
 
+type glyphCacheKey struct {
+	entry string
+	r     rune
+}
+
+type contentSelectionKey struct {
+	request string
+	content string
+}
+
 func (f *loadedFontFile) close() {
 	if f == nil {
 		return
@@ -109,8 +124,15 @@ type FontManager struct {
 	familyCache   map[string][]fontRecord
 	missCache     map[string]struct{}
 	pathCache     map[string][]fontRecord
+	chainCache    map[string]*ResolvedFontChain
 
-	sourceCache *lru.Cache[string, *loadedFontFile]
+	sourceCache  *lru.Cache[string, *loadedFontFile]
+	glyphCache   *lru.Cache[glyphCacheKey, bool]
+	contentCache *lru.Cache[contentSelectionKey, []ResolvedFont]
+
+	systemIndexOnce sync.Once
+	systemIndex     []fontRecord
+	systemIndexErr  error
 
 	systemDirs       []string
 	systemFallbacks  []string
@@ -130,17 +152,89 @@ func NewFontManager(sourceCacheSize int) *FontManager {
 	cache, _ := lru.NewWithEvict[string, *loadedFontFile](sourceCacheSize, func(_ string, value *loadedFontFile) {
 		value.close()
 	})
+	glyphCache, _ := lru.New[glyphCacheKey, bool](glyphSupportCacheSize)
+	contentCache, _ := lru.New[contentSelectionKey, []ResolvedFont](contentSelectionCacheSize)
 	return &FontManager{
 		customPaths:      map[string]string{},
 		fallbackRules:    map[string][]string{},
 		familyCache:      map[string][]fontRecord{},
 		missCache:        map[string]struct{}{},
 		pathCache:        map[string][]fontRecord{},
+		chainCache:       map[string]*ResolvedFontChain{},
 		sourceCache:      cache,
+		glyphCache:       glyphCache,
+		contentCache:     contentCache,
 		systemDirs:       systemFontDirs(),
 		systemFallbacks:  systemFallbackFamilies(),
 		lastResortSource: mustBuildLastResortSource(),
 	}
+}
+
+func cloneResolvedFont(font *ResolvedFont) *ResolvedFont {
+	if font == nil {
+		return nil
+	}
+	clone := *font
+	return &clone
+}
+
+func cloneResolvedChain(chain *ResolvedFontChain) *ResolvedFontChain {
+	if chain == nil {
+		return nil
+	}
+	clone := &ResolvedFontChain{
+		Request:  chain.Request,
+		Families: append([]string{}, chain.Families...),
+		Primary:  cloneResolvedFont(chain.Primary),
+		Sources:  append([]*text.GoTextFaceSource{}, chain.Sources...),
+	}
+	if len(chain.Fallbacks) > 0 {
+		clone.Fallbacks = make([]*ResolvedFont, 0, len(chain.Fallbacks))
+		for _, fallback := range chain.Fallbacks {
+			clone.Fallbacks = append(clone.Fallbacks, cloneResolvedFont(fallback))
+		}
+	}
+	return clone
+}
+
+func cloneResolvedFonts(fonts []*ResolvedFont, keepSource bool) []ResolvedFont {
+	if len(fonts) == 0 {
+		return nil
+	}
+	out := make([]ResolvedFont, 0, len(fonts))
+	for _, font := range fonts {
+		if font == nil {
+			continue
+		}
+		clone := *font
+		if !keepSource {
+			clone.Source = nil
+		}
+		out = append(out, clone)
+	}
+	return out
+}
+
+func (m *FontManager) restoreResolvedFonts(entries []ResolvedFont) ([]*ResolvedFont, error) {
+	fonts := make([]*ResolvedFont, 0, len(entries))
+	for _, entry := range entries {
+		font := entry
+		font.Source = nil
+		loaded, err := m.ensureResolvedFontLoaded(&font)
+		if err != nil {
+			return nil, err
+		}
+		fonts = append(fonts, loaded)
+	}
+	return fonts, nil
+}
+
+func (m *FontManager) resetDerivedCachesLocked() {
+	m.chainCache = map[string]*ResolvedFontChain{}
+	glyphCache, _ := lru.New[glyphCacheKey, bool](glyphSupportCacheSize)
+	contentCache, _ := lru.New[contentSelectionKey, []ResolvedFont](contentSelectionCacheSize)
+	m.glyphCache = glyphCache
+	m.contentCache = contentCache
 }
 
 func systemFontDirs() []string {
@@ -226,6 +320,7 @@ func (m *FontManager) RegisterFallback(userRules map[string][]string) {
 		}
 		m.fallbackRules[key] = normalizeFamilies(rules)
 	}
+	m.resetDerivedCachesLocked()
 }
 
 func (m *FontManager) RegisterCustomFontPath(name, path string) error {
@@ -255,6 +350,7 @@ func (m *FontManager) RegisterCustomFontPath(name, path string) error {
 	for _, record := range aliased {
 		m.pathCache[filepath.Clean(record.Path)] = append([]fontRecord{}, records...)
 	}
+	m.resetDerivedCachesLocked()
 	return nil
 }
 
@@ -295,12 +391,23 @@ func (m *FontManager) SetLastResortPath(path string) error {
 	m.mu.Lock()
 	m.lastResortPath = path
 	m.lastResortSource = source
+	m.resetDerivedCachesLocked()
 	m.mu.Unlock()
 	return nil
 }
 
 func (m *FontManager) ResolveChain(req FontRequest) (*ResolvedFontChain, error) {
 	req = req.Normalized()
+	cacheKey := req.CacheKey()
+
+	m.mu.RLock()
+	if cached, ok := m.chainCache[cacheKey]; ok && cached != nil {
+		clone := cloneResolvedChain(cached)
+		m.mu.RUnlock()
+		return clone, nil
+	}
+	m.mu.RUnlock()
+
 	families := m.buildFamilyChain(req)
 
 	resolved := &ResolvedFontChain{
@@ -329,7 +436,10 @@ func (m *FontManager) ResolveChain(req FontRequest) (*ResolvedFontChain, error) 
 		lastResort := m.lastResortFace()
 		resolved.Primary = lastResort
 		resolved.Families = append(resolved.Families, lastResortFamily)
-		return resolved, nil
+		m.mu.Lock()
+		m.chainCache[cacheKey] = cloneResolvedChain(resolved)
+		m.mu.Unlock()
+		return cloneResolvedChain(resolved), nil
 	}
 
 	lastResort := m.lastResortFace()
@@ -340,7 +450,10 @@ func (m *FontManager) ResolveChain(req FontRequest) (*ResolvedFontChain, error) 
 		}
 	}
 
-	return resolved, nil
+	m.mu.Lock()
+	m.chainCache[cacheKey] = cloneResolvedChain(resolved)
+	m.mu.Unlock()
+	return cloneResolvedChain(resolved), nil
 }
 
 func (m *FontManager) GetFace(req FontRequest, size float64) (text.Face, error) {
@@ -383,6 +496,18 @@ func (m *FontManager) GetFaceForText(req FontRequest, size float64, content stri
 func (m *FontManager) loadFontsForContent(chain *ResolvedFontChain, content string) ([]*ResolvedFont, error) {
 	if chain == nil || chain.Primary == nil {
 		return nil, errors.New("resolved chain is empty")
+	}
+	if content != "" && m != nil && m.contentCache != nil {
+		cacheKey := contentSelectionKey{
+			request: chain.Request.CacheKey(),
+			content: content,
+		}
+		m.mu.Lock()
+		cached, ok := m.contentCache.Get(cacheKey)
+		m.mu.Unlock()
+		if ok {
+			return m.restoreResolvedFonts(cached)
+		}
 	}
 
 	allFonts := make([]*ResolvedFont, 0, 1+len(chain.Fallbacks))
@@ -435,7 +560,7 @@ func (m *FontManager) loadFontsForContent(chain *ResolvedFontChain, content stri
 			if err != nil || loadedFallback == nil || loadedFallback.Source == nil {
 				continue
 			}
-			if sourceHasRune(loadedFallback.Source, r) {
+			if m.fontHasRune(loadedFallback, r) {
 				found = true
 				break
 			}
@@ -443,9 +568,19 @@ func (m *FontManager) loadFontsForContent(chain *ResolvedFontChain, content stri
 		if !found {
 			lastResort, err := loadFont(m.lastResortFace())
 			if err == nil && lastResort != nil && lastResort.Source != nil {
-				_ = sourceHasRune(lastResort.Source, r)
+				_ = m.fontHasRune(lastResort, r)
 			}
 		}
+	}
+
+	if content != "" && m != nil && m.contentCache != nil {
+		cacheKey := contentSelectionKey{
+			request: chain.Request.CacheKey(),
+			content: content,
+		}
+		m.mu.Lock()
+		m.contentCache.Add(cacheKey, cloneResolvedFonts(ordered, false))
+		m.mu.Unlock()
 	}
 
 	return ordered, nil
@@ -456,11 +591,45 @@ func (m *FontManager) loadedFontsHaveRune(fonts []*ResolvedFont, r rune) bool {
 		if font == nil || font.Source == nil {
 			continue
 		}
-		if sourceHasRune(font.Source, r) {
+		if m.fontHasRune(font, r) {
 			return true
 		}
 	}
 	return false
+}
+
+func (m *FontManager) fontHasRune(font *ResolvedFont, r rune) bool {
+	if m == nil || font == nil || r == 0 {
+		return false
+	}
+	key := glyphCacheKey{
+		entry: font.entryKey(),
+		r:     r,
+	}
+	if m.glyphCache != nil {
+		m.mu.Lock()
+		cached, ok := m.glyphCache.Get(key)
+		m.mu.Unlock()
+		if ok {
+			return cached
+		}
+	}
+
+	loadedFont := font
+	if loadedFont.Source == nil {
+		var err error
+		loadedFont, err = m.ensureResolvedFontLoaded(font)
+		if err != nil || loadedFont == nil || loadedFont.Source == nil {
+			return false
+		}
+	}
+	supported := sourceHasRune(loadedFont.Source, r)
+	if m.glyphCache != nil {
+		m.mu.Lock()
+		m.glyphCache.Add(key, supported)
+		m.mu.Unlock()
+	}
+	return supported
 }
 
 func (m *FontManager) buildFamilyChain(req FontRequest) []string {
@@ -668,6 +837,14 @@ func (m *FontManager) lookupFamilyCandidates(family string) ([]fontRecord, error
 }
 
 func (m *FontManager) searchFamilyOnDemand(family string) ([]fontRecord, error) {
+	if matches, handled, err := m.searchFamilyPlatform(family); handled {
+		return matches, err
+	}
+
+	return m.searchFamilyByWalkingDirs(family)
+}
+
+func (m *FontManager) searchFamilyByWalkingDirs(family string) ([]fontRecord, error) {
 	target := normalizeName(family)
 	if target == "" {
 		return nil, nil
@@ -711,9 +888,32 @@ func (m *FontManager) searchFamilyOnDemand(family string) ([]fontRecord, error) 
 		})
 	}
 
+	records := append(exactMatches, prefixMatches...)
+	return filterRecordsByFamily(records, family), nil
+}
+
+func filterRecordsByFamily(records []fontRecord, family string) []fontRecord {
+	if len(records) == 0 {
+		return nil
+	}
+
+	exactMatches := make([]fontRecord, 0, len(records))
+	prefixMatches := make([]fontRecord, 0, len(records))
+	for _, record := range records {
+		switch record.familyMatchLevel(family) {
+		case familyMatchExact:
+			exactMatches = append(exactMatches, record)
+		case familyMatchPrefix:
+			prefixMatches = append(prefixMatches, record)
+		}
+	}
+
 	matches := exactMatches
 	if len(matches) == 0 {
 		matches = prefixMatches
+	}
+	if len(matches) == 0 {
+		return nil
 	}
 
 	sort.SliceStable(matches, func(i, j int) bool {
@@ -732,10 +932,6 @@ func (m *FontManager) searchFamilyOnDemand(family string) ([]fontRecord, error) 
 		return normalizeName(matches[i].Family) < normalizeName(matches[j].Family)
 	})
 
-	if len(matches) == 0 {
-		return nil, nil
-	}
-
 	out := make([]fontRecord, 0, len(matches))
 	for _, record := range matches {
 		if record.familyMatchLevel(family) == familyMatchNone {
@@ -743,7 +939,7 @@ func (m *FontManager) searchFamilyOnDemand(family string) ([]fontRecord, error) 
 		}
 		out = append(out, record)
 	}
-	return out, nil
+	return out
 }
 
 func (m *FontManager) inspectCachedPath(path string) ([]fontRecord, error) {

@@ -124,6 +124,25 @@ func normalizeSyllableText(s string) string {
 	return s
 }
 
+func syllableCachedWidth(syllable *LineSyllable, fallback func(string) float64) float64 {
+	if syllable == nil {
+		return 0
+	}
+	width := 0.0
+	hasImageWidth := false
+	for _, element := range syllable.Elements {
+		if element == nil || element.SyllableImage == nil {
+			continue
+		}
+		width += element.SyllableImage.GetWidth()
+		hasImageWidth = true
+	}
+	if hasImageWidth {
+		return width
+	}
+	return fallback(normalizeSyllableText(syllable.Syllable))
+}
+
 func AutoLayoutSyllable(
 	layoutData [][]*LineSyllable,
 	face text.Face,
@@ -152,10 +171,7 @@ func AutoLayoutSyllable(
 	measureWord := func(syllables []*LineSyllable) float64 {
 		wordWidth := 0.0
 		for _, syllable := range syllables {
-			if syllable == nil {
-				continue
-			}
-			wordWidth += measureText(normalizeSyllableText(syllable.Syllable))
+			wordWidth += syllableCachedWidth(syllable, measureText)
 		}
 		return wordWidth
 	}
@@ -199,7 +215,7 @@ func AutoLayoutSyllable(
 			if syllable == nil {
 				continue
 			}
-			syllableWidth := measureText(normalizeSyllableText(syllable.Syllable))
+			syllableWidth := syllableCachedWidth(syllable, measureText)
 			syllablePositions = append(syllablePositions, NewPosition(
 				currentX,
 				float64(lineIndex)*lineStep,
