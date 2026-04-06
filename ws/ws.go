@@ -18,12 +18,22 @@ import (
 	"os"
 	"os/signal"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
 	"github.com/disintegration/imaging"
 	"github.com/gorilla/websocket"
 )
+
+var (
+	wsServerListening   atomic.Bool
+	wsActiveConnections atomic.Int32
+)
+
+func StatusSnapshot() (listening bool, connections int) {
+	return wsServerListening.Load(), int(wsActiveConnections.Load())
+}
 
 // ===========================
 // 1. 数据结构定义
@@ -350,10 +360,12 @@ func (s *AMLLWebSocketServer) Close() {
 		close(s.stopChan)
 		s.stopChan = nil
 	}
+	wsServerListening.Store(false)
 	for _, info := range s.connections {
 		info.Conn.Close()
 	}
 	s.connections = make(map[string]ConnectionInfo)
+	wsActiveConnections.Store(0)
 }
 
 func (s *AMLLWebSocketServer) Reopen(addr string, msgChan MessageChannel) {
@@ -362,6 +374,8 @@ func (s *AMLLWebSocketServer) Reopen(addr string, msgChan MessageChannel) {
 	stopChan := s.stopChan
 
 	go func() {
+		wsServerListening.Store(true)
+		defer wsServerListening.Store(false)
 		log.Printf("INFO: WebSocket 服务器监听中: %s", addr)
 		mux := http.NewServeMux()
 		mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
@@ -435,6 +449,7 @@ func (s *AMLLWebSocketServer) acceptConn(w http.ResponseWriter, r *http.Request,
 		s.mu.Lock()
 		s.connections[addr] = ConnectionInfo{Conn: conn, Protocol: protocolType}
 		s.mu.Unlock()
+		wsActiveConnections.Add(1)
 	} else {
 		return
 	}
@@ -471,6 +486,7 @@ func (s *AMLLWebSocketServer) acceptConn(w http.ResponseWriter, r *http.Request,
 	s.mu.Lock()
 	delete(s.connections, addr)
 	s.mu.Unlock()
+	wsActiveConnections.Add(-1)
 }
 
 func (s *AMLLWebSocketServer) processV1Message(msgType int, data []byte, channel MessageChannel) error {

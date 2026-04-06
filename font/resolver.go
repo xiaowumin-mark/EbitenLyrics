@@ -1142,6 +1142,67 @@ func (m *FontManager) Stats() FontManagerStats {
 	return stats
 }
 
+func (m *FontManager) AvailableFamilies() []string {
+	if m == nil {
+		return nil
+	}
+
+	seen := map[string]struct{}{}
+	out := make([]string, 0, 256)
+	addFamily := func(family string) {
+		family = strings.TrimSpace(family)
+		if family == "" {
+			return
+		}
+		key := normalizeName(family)
+		if key == "" {
+			return
+		}
+		if _, ok := seen[key]; ok {
+			return
+		}
+		seen[key] = struct{}{}
+		out = append(out, family)
+	}
+
+	m.mu.RLock()
+	for _, path := range m.customPaths {
+		records := m.pathCache[filepath.Clean(path)]
+		for _, record := range records {
+			addFamily(record.Family)
+			for _, alias := range record.Aliases {
+				addFamily(alias)
+			}
+		}
+	}
+	for _, records := range m.familyCache {
+		for _, record := range records {
+			addFamily(record.Family)
+			for _, alias := range record.Aliases {
+				addFamily(alias)
+			}
+		}
+	}
+	systemReady := m.systemIndexReady
+	systemRecords := append([]fontRecord{}, m.systemIndex...)
+	m.mu.RUnlock()
+
+	if systemReady {
+		for _, record := range systemRecords {
+			addFamily(record.Family)
+		}
+	}
+
+	for _, family := range m.systemFallbacks {
+		addFamily(family)
+	}
+
+	sort.SliceStable(out, func(i, j int) bool {
+		return strings.ToLower(out[i]) < strings.ToLower(out[j])
+	})
+	return out
+}
+
 func mmapFile(path string) (mmap.MMap, error) {
 	file, err := os.Open(filepath.Clean(path))
 	if err != nil {

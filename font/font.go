@@ -48,3 +48,7 @@ func GetFaceForText(req FontRequest, size float64, content string) (text.Face, e
 func FindFaceForRune(r rune, chain []string) (text.Face, error) {
 	return DefaultManager().FindFaceForRune(r, chain)
 }
+
+func AvailableFamilies() []string {
+	return DefaultManager().AvailableFamilies()
+}

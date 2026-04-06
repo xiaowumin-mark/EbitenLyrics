@@ -340,6 +340,24 @@ func (h *Home) initFamilyChoices() {
 	h.familyIndex = 0
 }
 
+func (h *Home) availableFamilyChoices() []string {
+	choices := append([]string{}, h.familyChoices...)
+	if h.FontManager != nil {
+		choices = append(choices, h.FontManager.AvailableFamilies()...)
+	}
+	if h.currentFamily != "" {
+		choices = append([]string{h.currentFamily}, choices...)
+	}
+	h.familyChoices = dedupFamilies(choices)
+	if len(h.familyChoices) == 0 {
+		h.familyChoices = []string{"Microsoft YaHei UI", "Noto Sans CJK SC", "Segoe UI"}
+	}
+	if h.familyIndex < 0 || h.familyIndex >= len(h.familyChoices) {
+		h.familyIndex = 0
+	}
+	return h.familyChoices
+}
+
 func (h *Home) setCurrentFamilyChoice(family string) {
 	family = strings.TrimSpace(family)
 	if family == "" {
@@ -538,73 +556,97 @@ func (h *Home) loadAndApplyFontConfig(path string) {
 
 func (h *Home) debugSummaryText() string {
 	lines := []string{
-		fmt.Sprintf("Family: %s", h.currentFamily),
-		fmt.Sprintf("Weight: %d", h.fontWeight),
-		fmt.Sprintf("Italic: %v", h.fontItalic),
-		fmt.Sprintf("User Scroll: %v", h.isUserScrolling),
-		fmt.Sprintf("LowFreqVolume: %.2f", h.pendingLowFreqVolume),
-		"Shortcuts: Esc toggle panel, F2 liquid test, F5/F6 family, F7/F8 weight, F9 italic, F10 reload config, F11 fullscreen",
+		fmt.Sprintf("字体: %s", h.currentFamily),
+		fmt.Sprintf("字重: %d", h.fontWeight),
+		fmt.Sprintf("斜体: %v", h.fontItalic),
+		fmt.Sprintf("用户滚动: %v", h.isUserScrolling),
+		fmt.Sprintf("低频音量: %.2f", h.pendingLowFreqVolume),
+		"快捷键: Esc 显示/隐藏面板, F2 液态玻璃测试, F5/F6 切字体, F7/F8 切字重, F9 切斜体, F10 重载字体配置, F11 全屏",
 	}
 	return strings.Join(lines, "\n")
 }
 
+func (h *Home) runtimeStatusText() string {
+	listening, connections := ws.StatusSnapshot()
+	wsStatus := "未启动"
+	switch {
+	case listening && connections > 0:
+		wsStatus = fmt.Sprintf("已连接 (%d)", connections)
+	case listening:
+		wsStatus = "监听中 端口:11445"
+	}
+
+	return fmt.Sprintf(
+		"WebSocket: %s\nTPS: %.2f\nFPS: %.2f",
+		wsStatus,
+		ebiten.ActualTPS(),
+		ebiten.ActualFPS(),
+	)
+}
+
 func (h *Home) setupDebugPanel() {
 	panel := debugpanel.New(
-		"Home Debug",
+		"首页调试",
 		image.Rect(lp.LPInt(18), lp.LPInt(18), lp.LPInt(360), lp.LPInt(560)),
 	)
 
-	panel.Group("Lyrics", true).
-		Description("Runtime tuning for lyric layout and movement.").
-		Float("Font Size", &h.FontSize, 8, 120, 1, 0, func(value float64) {
+	panel.Group("运行状态", true).
+		Description("实时显示连接状态与渲染帧率。").
+		Text("", func() string {
+			return h.runtimeStatusText()
+		})
+
+	panel.Group("歌词", true).
+		Description("运行时调整歌词布局与动画参数。").
+		Float("字体大小", &h.FontSize, 8, 120, 1, 0, func(value float64) {
 			h.setFontSize(value)
 		}).
-		Float("FD", &h.FD, 0.0001, 3, 0.01, 2, func(value float64) {
+		Float("渐变宽度比", &h.FD, 0.0001, 3, 0.01, 2, func(value float64) {
 			h.setFD(value)
 		}).
-		Bool("Smart TS Wrap", &h.SmartTranslateWrap, func(value bool) {
+		Bool("智能翻译换行", &h.SmartTranslateWrap, func(value bool) {
 			h.setSmartTranslateWrap(value)
 		})
 
-	panel.Group("Font", true).
-		Select("Family", func() []string {
-			return h.familyChoices
+	panel.Group("字体", true).
+		Select("字体族", func() []string {
+			return h.availableFamilyChoices()
 		}, func() int {
 			return h.familyIndex
 		}, func(index int) {
 			h.setFamilyChoiceIndex(index)
 		}).
-		Select("Weight", func() []string {
+		Select("字重", func() []string {
 			return h.weightChoiceLabels()
 		}, func() int {
 			return h.currentWeightChoiceIndex()
 		}, func(index int) {
 			h.setWeightChoiceIndex(index)
 		}).
-		Bool("Italic", &h.fontItalic, func(value bool) {
+		Bool("斜体", &h.fontItalic, func(value bool) {
 			h.applyFontRequest(f.FontRequest{
 				Families: []string{h.currentFamilyChoice()},
 				Weight:   h.fontWeight,
 				Italic:   value,
 			})
 		}).
-		Action("Reload Font Config", func() {
+		Action("重载字体配置", func() {
 			h.loadAndApplyFontConfig(h.fontConfig)
 		})
 
-	panel.Group("Window", false).
-		Float("User Scale", &h.UserScale, 0.25, 4.0, 0.05, 2, func(value float64) {
+	panel.Group("窗口", false).
+		Float("用户缩放", &h.UserScale, 0.25, 4.0, 0.05, 2, func(value float64) {
 			h.setUserScale(value)
 		}).
-		Action("Toggle Fullscreen", func() {
+		Action("切换全屏", func() {
 			ebiten.SetFullscreen(!ebiten.IsFullscreen())
 		})
 
-	panel.Group("Stats", true).
+	panel.Group("统计", true).
 		Text("", func() string {
 			return h.debugSummaryText()
 		}).
-		Text("Memory", func() string {
+		Text("内存", func() string {
 			return h.memPanel
 		})
 
