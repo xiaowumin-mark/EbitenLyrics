@@ -12,46 +12,101 @@ import (
 
 const windowsFontsRegistryPath = `SOFTWARE\Microsoft\Windows NT\CurrentVersion\Fonts`
 
-func (m *FontManager) searchFamilyPlatform(family string) ([]fontRecord, bool, error) {
-	records, err := m.windowsSystemFontIndex()
-	if err != nil {
-		return nil, false, err
-	}
-	if len(records) == 0 {
-		return nil, false, nil
-	}
-	return filterRecordsByFamily(records, family), true, nil
+type windowsRegistryFontEntry struct {
+	Name string
+	Path string
 }
 
-func (m *FontManager) windowsSystemFontIndex() ([]fontRecord, error) {
+func (m *FontManager) postInit() {
+	go m.buildWindowsSystemIndex()
+}
+
+func (m *FontManager) searchFamilyPlatform(family string) ([]fontRecord, bool, error) {
+	if records := m.peekWindowsSystemIndex(); len(records) > 0 {
+		return filterRecordsByFamily(records, family), true, nil
+	}
+
+	records, err := m.searchFamilyInWindowsRegistry(family)
+	if err != nil {
+		return nil, true, err
+	}
+	if len(records) > 0 {
+		return records, true, nil
+	}
+
+	if records := m.peekWindowsSystemIndex(); len(records) > 0 {
+		return filterRecordsByFamily(records, family), true, nil
+	}
+	return nil, true, nil
+}
+
+func (m *FontManager) buildWindowsSystemIndex() {
 	m.systemIndexOnce.Do(func() {
-		paths, err := loadWindowsFontRegistryPaths()
+		entries, err := loadWindowsFontRegistryEntries()
 		if err != nil {
+			m.mu.Lock()
 			m.systemIndexErr = err
+			m.systemIndexReady = true
+			m.mu.Unlock()
 			return
 		}
 
-		index := make([]fontRecord, 0, len(paths))
-		for _, path := range paths {
-			records, err := m.inspectCachedPath(path)
+		index := make([]fontRecord, 0, len(entries))
+		for _, entry := range entries {
+			records, err := m.inspectCachedPath(entry.Path)
 			if err != nil || len(records) == 0 {
 				continue
 			}
 			index = append(index, records...)
 		}
-		m.systemIndex = index
-	})
 
-	if m.systemIndexErr != nil {
-		return nil, m.systemIndexErr
-	}
-	return append([]fontRecord{}, m.systemIndex...), nil
+		m.mu.Lock()
+		m.systemIndex = index
+		m.systemIndexReady = true
+		m.mu.Unlock()
+	})
 }
 
-func loadWindowsFontRegistryPaths() ([]string, error) {
+func (m *FontManager) peekWindowsSystemIndex() []fontRecord {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if !m.systemIndexReady || len(m.systemIndex) == 0 {
+		return nil
+	}
+	return append([]fontRecord{}, m.systemIndex...)
+}
+
+func (m *FontManager) searchFamilyInWindowsRegistry(family string) ([]fontRecord, error) {
+	target := normalizeName(family)
+	if target == "" {
+		return nil, nil
+	}
+
+	entries, err := loadWindowsFontRegistryEntries()
+	if err != nil {
+		return nil, err
+	}
+
+	candidates := make([]fontRecord, 0, 8)
+	for _, entry := range entries {
+		if !windowsRegistryNameLikelyMatches(entry.Name, target) {
+			continue
+		}
+
+		records, err := m.inspectCachedPath(entry.Path)
+		if err != nil || len(records) == 0 {
+			continue
+		}
+		candidates = append(candidates, records...)
+	}
+
+	return filterRecordsByFamily(candidates, family), nil
+}
+
+func loadWindowsFontRegistryEntries() ([]windowsRegistryFontEntry, error) {
 	fontDirs := windowsFontDirectories()
 	seen := map[string]struct{}{}
-	out := make([]string, 0, 512)
+	out := make([]windowsRegistryFontEntry, 0, 512)
 
 	for _, root := range []registry.Key{registry.LOCAL_MACHINE, registry.CURRENT_USER} {
 		key, err := registry.OpenKey(root, windowsFontsRegistryPath, registry.QUERY_VALUE)
@@ -74,13 +129,41 @@ func loadWindowsFontRegistryPaths() ([]string, error) {
 					continue
 				}
 				seen[path] = struct{}{}
-				out = append(out, path)
+				out = append(out, windowsRegistryFontEntry{
+					Name: strings.TrimSpace(name),
+					Path: path,
+				})
 			}
 		}
 		_ = key.Close()
 	}
 
 	return out, nil
+}
+
+func windowsRegistryNameLikelyMatches(name, target string) bool {
+	normalized := normalizeWindowsRegistryFontName(name)
+	if normalized == "" || target == "" {
+		return false
+	}
+	return normalized == target ||
+		strings.HasPrefix(normalized, target) ||
+		strings.Contains(normalized, target) ||
+		strings.HasPrefix(target, normalized)
+}
+
+func normalizeWindowsRegistryFontName(name string) string {
+	name = strings.TrimSpace(name)
+	if idx := strings.Index(name, "("); idx >= 0 {
+		name = strings.TrimSpace(name[:idx])
+	}
+	replacer := strings.NewReplacer(
+		" truetype", "",
+		" opentype", "",
+		" variable", "",
+	)
+	name = replacer.Replace(strings.ToLower(name))
+	return normalizeName(name)
 }
 
 func windowsFontDirectories() []string {

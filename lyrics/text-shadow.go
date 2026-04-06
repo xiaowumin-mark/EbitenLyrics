@@ -6,6 +6,7 @@ package lyrics
 import (
 	"EbitenLyrics/filters"
 	ft "EbitenLyrics/font"
+	"EbitenLyrics/lp"
 	"image/color"
 
 	"github.com/hajimehoshi/ebiten/v2"
@@ -36,6 +37,8 @@ func NewTextShadow(texts string, fontManager *ft.FontManager, req ft.FontRequest
 	tw, th := 1.0, 1.0
 	if face != nil {
 		tw, th = text.Measure(texts, face, 1.0)
+		tw = lp.FromLP(tw)
+		th = lp.FromLP(th)
 	}
 
 	return &TextShadow{
@@ -69,7 +72,7 @@ func (ts *TextShadow) ensureOriginImage() bool {
 
 	ts.OriginImage = ebiten.NewImage(safeImageLength(ts.Width), safeImageLength(ts.Height))
 	op := &text.DrawOptions{}
-	op.GeoM.Translate(ts.Margin, ts.Margin)
+	op.GeoM.Translate(lp.LP(ts.Margin), lp.LP(ts.Margin))
 	op.ColorScale.ScaleWithColor(color.White)
 	text.Draw(ts.OriginImage, ts.Text, face, op)
 

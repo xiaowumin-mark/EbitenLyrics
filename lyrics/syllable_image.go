@@ -5,6 +5,7 @@ package lyrics
 
 import (
 	ft "EbitenLyrics/font"
+	"EbitenLyrics/lp"
 	"errors"
 	"image/color"
 	"math"
@@ -53,6 +54,8 @@ func CreateSyllableImage(
 	}
 
 	tw, th := text.Measure(syllable, font, 1.0)
+	tw = lp.FromLP(tw)
+	th = lp.FromLP(th)
 	if tw <= 0 {
 		tw = 1
 	}
@@ -158,6 +161,8 @@ func (s *SyllableImage) updateMetrics() {
 		return
 	}
 	tw, th := text.Measure(s.Text, font, 1.0)
+	tw = lp.FromLP(tw)
+	th = lp.FromLP(th)
 	if tw <= 0 {
 		tw = 1
 	}
@@ -292,8 +297,8 @@ func (s *SyllableImage) drawMasked(img, gradient *ebiten.Image, offset float64, 
 
 	op := &ebiten.DrawImageOptions{}
 	op.Blend = ebiten.BlendSourceIn
-	op.GeoM.Translate(offset, 0)
-	op.GeoM.Scale(1, math.Max(1, s.Height))
+	op.GeoM.Translate(lp.LP(offset), 0)
+	op.GeoM.Scale(1, math.Max(1, lp.LP(s.Height)))
 	op.ColorScale.ScaleAlpha(float32(alpha))
 	s.tempImage.DrawImage(gradient, op)
 

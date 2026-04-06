@@ -6,6 +6,7 @@ package main
 import (
 	"EbitenLyrics/anim"
 	f "EbitenLyrics/font"
+	"EbitenLyrics/lp"
 	"EbitenLyrics/pages"
 	"EbitenLyrics/router"
 	"EbitenLyrics/ws"
@@ -41,6 +42,13 @@ func (g *Game) currentOutsideSize() (int, int) {
 }
 
 func (g *Game) Update() error {
+	now := time.Now()
+	if g.last.IsZero() {
+		g.last = now
+	}
+	dt := now.Sub(g.last)
+	g.last = now
+
 	w, h := g.currentOutsideSize()
 
 	if router.NeedFirstResize() {
@@ -62,19 +70,17 @@ func (g *Game) Update() error {
 
 	scene := router.Current()
 	if scene == nil {
+		g.animMgr.Update(dt)
 		return nil
 	}
-	return scene.Update()
+	if err := scene.Update(); err != nil {
+		return err
+	}
+	g.animMgr.Update(dt)
+	return nil
 }
 
 func (g *Game) Draw(screen *ebiten.Image) {
-	now := time.Now()
-	if g.last.IsZero() {
-		g.last = now
-	}
-	dt := now.Sub(g.last)
-	g.last = now
-	g.animMgr.Update(dt)
 	screen.Clear()
 
 	if scene := router.Current(); scene != nil {
@@ -95,8 +101,10 @@ func (g *Game) Layout(outsideWidth, outsideHeight int) (int, int) {
 
 func main() {
 	initfont()
+	lp.RefreshSystemScale()
+	lp.SetUserScale(1.0)
 
-	ebiten.SetWindowSize(1100, 670)
+	ebiten.SetWindowSize(lp.LPInt(1100), lp.LPInt(670))
 	game.animMgr = anim.NewManager(false)
 
 	router.Add("home", &pages.Home{
@@ -114,6 +122,7 @@ func main() {
 		FontRequest:    game.fontRequest,
 		AnimateManager: game.animMgr,
 	})
+	router.Add("liquid_glass_test", &pages.LiquidGlassTest{})
 
 	router.Go("home", nil)
 	game.last = time.Now()

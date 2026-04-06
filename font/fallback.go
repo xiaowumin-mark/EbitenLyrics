@@ -1,6 +1,7 @@
 package font
 
 import (
+	"EbitenLyrics/lp"
 	"errors"
 
 	gotextfont "github.com/go-text/typesetting/font"
@@ -29,7 +30,7 @@ func (m *FontManager) findFaceForRuneWithSize(r rune, chain []string, size float
 	}
 	for _, font := range fonts {
 		if font != nil && sourceHasRune(font.Source, r) {
-			return &text.GoTextFace{Source: font.Source, Size: size}, nil
+			return &text.GoTextFace{Source: font.Source, Size: lp.LP(size)}, nil
 		}
 	}
 	return nil, errors.New("no face in fallback chain covers rune")

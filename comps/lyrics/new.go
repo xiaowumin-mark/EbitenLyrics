@@ -6,10 +6,10 @@ package LyricsComponent
 import (
 	"EbitenLyrics/anim"
 	ft "EbitenLyrics/font"
+	"EbitenLyrics/lp"
 	"EbitenLyrics/lyrics"
 	"EbitenLyrics/ttml"
 	"log"
-	"math"
 	"runtime"
 	"runtime/debug"
 	"time"
@@ -17,34 +17,44 @@ import (
 	"github.com/hajimehoshi/ebiten/v2"
 )
 
+const lyricsSwitchFadeDuration = 280 * time.Millisecond
+
 type LyricsComponent struct {
-	LyricsControl  *lyrics.Lyrics
-	AnimateManager *anim.Manager
-	FontManager    *ft.FontManager
-	FontRequest    ft.FontRequest
-	Width, Height  float64
-	FontSize       float64
-	FD             float64
-	Image          *ebiten.Image
+	LyricsControl      *lyrics.Lyrics
+	AnimateManager     *anim.Manager
+	FontManager        *ft.FontManager
+	FontRequest        ft.FontRequest
+	Width, Height      float64
+	FontSize           float64
+	FD                 float64
+	SmartTranslateWrap bool
+	Image              *ebiten.Image
+	StaticImage        *ebiten.Image
+	TransitionImage    *ebiten.Image
+
+	staticLayerSignature uint64
+	staticLayerReady     bool
+	switchFadeStart      time.Time
+	switchFadeDuration   time.Duration
+	switchFadeActive     bool
 }
 
 func NewLyricsComponent(anim *anim.Manager, fontManager *ft.FontManager, req ft.FontRequest, w, h, fs, fd float64) *LyricsComponent {
 	return &LyricsComponent{
-		AnimateManager: anim,
-		FontManager:    fontManager,
-		FontRequest:    req.Normalized(),
-		Width:          w,
-		Height:         h,
-		FontSize:       fs,
-		FD:             fd,
+		AnimateManager:     anim,
+		FontManager:        fontManager,
+		FontRequest:        req.Normalized(),
+		Width:              w,
+		Height:             h,
+		FontSize:           fs,
+		FD:                 fd,
+		SmartTranslateWrap: true,
+		switchFadeDuration: lyricsSwitchFadeDuration,
 	}
 }
 
 func safeImageSize(v float64) int {
-	if math.IsNaN(v) || math.IsInf(v, 0) || v <= 0 {
-		return 1
-	}
-	return int(math.Ceil(v))
+	return lp.LPSize(v)
 }
 
 func (l *LyricsComponent) recreateImage() {
@@ -52,7 +62,20 @@ func (l *LyricsComponent) recreateImage() {
 		l.Image.Deallocate()
 		l.Image = nil
 	}
+	if l.StaticImage != nil {
+		l.StaticImage.Deallocate()
+		l.StaticImage = nil
+	}
+	if l.TransitionImage != nil {
+		l.TransitionImage.Deallocate()
+		l.TransitionImage = nil
+	}
 	l.Image = ebiten.NewImage(safeImageSize(l.Width), safeImageSize(l.Height))
+	l.StaticImage = ebiten.NewImage(safeImageSize(l.Width), safeImageSize(l.Height))
+	l.staticLayerSignature = 0
+	l.staticLayerReady = false
+	l.switchFadeStart = time.Time{}
+	l.switchFadeActive = false
 }
 
 func (l *LyricsComponent) Init() {
@@ -63,6 +86,127 @@ func releaseLyricsMemory() {
 	lyrics.PurgeSharedImageCache()
 	runtime.GC()
 	debug.FreeOSMemory()
+}
+
+func crossfadeProgress(start time.Time, duration time.Duration, now time.Time) float64 {
+	if start.IsZero() || duration <= 0 {
+		return 1
+	}
+	if now.Before(start) {
+		return 0
+	}
+	progress := float64(now.Sub(start)) / float64(duration)
+	if progress < 0 {
+		return 0
+	}
+	if progress > 1 {
+		return 1
+	}
+	return progress
+}
+
+func (l *LyricsComponent) finishSwitchFade() {
+	l.switchFadeActive = false
+	l.switchFadeStart = time.Time{}
+}
+
+func (l *LyricsComponent) ensureTransitionImage() {
+	if l.TransitionImage != nil {
+		currentW, currentH := l.TransitionImage.Size()
+		if currentW != safeImageSize(l.Width) || currentH != safeImageSize(l.Height) {
+			l.TransitionImage.Deallocate()
+			l.TransitionImage = nil
+		}
+	}
+	if l.TransitionImage == nil {
+		l.TransitionImage = ebiten.NewImage(safeImageSize(l.Width), safeImageSize(l.Height))
+	}
+}
+
+func drawImageWithAlpha(dst, src *ebiten.Image, alpha float64) {
+	if dst == nil || src == nil || alpha <= 0 {
+		return
+	}
+	if alpha > 1 {
+		alpha = 1
+	}
+	op := &ebiten.DrawImageOptions{}
+	op.ColorScale.ScaleAlpha(float32(alpha))
+	dst.DrawImage(src, op)
+}
+
+func (l *LyricsComponent) drawToScreen(screen *ebiten.Image, image *ebiten.Image, p *lyrics.Position, alpha float64) {
+	if screen == nil || image == nil || alpha <= 0 {
+		return
+	}
+	if alpha > 1 {
+		alpha = 1
+	}
+	dr := &ebiten.DrawImageOptions{}
+	dr.ColorScale.ScaleAlpha(float32(alpha))
+	if p != nil {
+		dr.GeoM = lyrics.TransformToGeoM(p)
+	}
+	screen.DrawImage(image, dr)
+}
+
+func (l *LyricsComponent) renderLyricsImage() bool {
+	if l.LyricsControl == nil {
+		return false
+	}
+	if l.Image == nil || l.StaticImage == nil {
+		l.recreateImage()
+	}
+	l.Image.Clear()
+	signature, hasStaticLayer, needsStaticRebuild := l.LyricsControl.StaticLayerSignature()
+	if hasStaticLayer {
+		if !l.staticLayerReady || l.staticLayerSignature != signature || needsStaticRebuild {
+			l.StaticImage.Clear()
+			l.LyricsControl.DrawStatic(l.StaticImage)
+			l.staticLayerSignature = signature
+			l.staticLayerReady = true
+		}
+		l.Image.DrawImage(l.StaticImage, &ebiten.DrawImageOptions{})
+	} else {
+		l.staticLayerSignature = 0
+		l.staticLayerReady = false
+	}
+	l.LyricsControl.DrawDynamic(l.Image)
+	return true
+}
+
+func (l *LyricsComponent) snapshotCurrentFrame() bool {
+	now := time.Now()
+	progress := 1.0
+	hasPrevious := false
+	if l.switchFadeActive && l.TransitionImage != nil {
+		progress = crossfadeProgress(l.switchFadeStart, l.switchFadeDuration, now)
+		hasPrevious = progress < 1
+	}
+
+	hasCurrent := l.renderLyricsImage()
+	if !hasPrevious && !hasCurrent {
+		return false
+	}
+
+	var snapshot *ebiten.Image
+	if hasPrevious {
+		snapshot = ebiten.NewImage(safeImageSize(l.Width), safeImageSize(l.Height))
+		drawImageWithAlpha(snapshot, l.TransitionImage, 1-progress)
+		if hasCurrent {
+			drawImageWithAlpha(snapshot, l.Image, progress)
+		}
+		if l.TransitionImage != nil {
+			l.TransitionImage.Deallocate()
+		}
+		l.TransitionImage = snapshot
+		return true
+	}
+
+	l.ensureTransitionImage()
+	l.TransitionImage.Clear()
+	drawImageWithAlpha(l.TransitionImage, l.Image, 1)
+	return true
 }
 
 /*func (l *LyricsComponent) SetLyrics(ls []ttml.LyricLine) *LyricsComponent {
@@ -86,6 +230,8 @@ func releaseLyricsMemory() {
 }*/
 // 在 comps/lyrics/new.go 中优化 SetLyrics 方法
 func (l *LyricsComponent) SetLyrics(ls []ttml.LyricLine) *LyricsComponent {
+	hadOutgoingFrame := l.snapshotCurrentFrame()
+
 	// 重用现有图像，避免频繁分配
 	if l.LyricsControl != nil {
 		l.LyricsControl.Dispose()
@@ -101,20 +247,44 @@ func (l *LyricsComponent) SetLyrics(ls []ttml.LyricLine) *LyricsComponent {
 			l.Image = nil
 		}
 	}
+	if l.StaticImage != nil {
+		currentW, currentH := l.StaticImage.Size()
+		if currentW != safeImageSize(l.Width) || currentH != safeImageSize(l.Height) {
+			l.StaticImage.Deallocate()
+			l.StaticImage = nil
+		}
+	}
 
-	if l.Image == nil {
-		l.Image = ebiten.NewImage(safeImageSize(l.Width), safeImageSize(l.Height))
+	if l.Image == nil || l.StaticImage == nil {
+		l.recreateImage()
 	}
 
 	control, err := lyrics.New(ls, l.Width, l.FontManager, l.FontRequest, l.FontSize, l.FD)
 	if err != nil {
 		log.Printf("lyrics init failed: %v", err)
+		if hadOutgoingFrame {
+			l.switchFadeStart = time.Now()
+			l.switchFadeActive = true
+		} else {
+			l.finishSwitchFade()
+		}
 		return l
 	}
 	l.LyricsControl = control
 	l.LyricsControl.AnimateManager = l.AnimateManager
 	l.LyricsControl.HighlightTime = time.Millisecond * 800
+	for _, line := range l.LyricsControl.Lines {
+		line.SetSmartTranslateWrap(l.SmartTranslateWrap)
+	}
 	l.LyricsControl.Scroll([]int{0}, 0)
+	l.staticLayerSignature = 0
+	l.staticLayerReady = false
+	if hadOutgoingFrame {
+		l.switchFadeStart = time.Now()
+		l.switchFadeActive = true
+	} else {
+		l.finishSwitchFade()
+	}
 	return l
 }
 func (l *LyricsComponent) Update(t time.Duration) {
@@ -183,21 +353,40 @@ func (l *LyricsComponent) SetFD(fd float64) *LyricsComponent {
 	return l
 }
 
+func (l *LyricsComponent) SetSmartTranslateWrap(enabled bool) *LyricsComponent {
+	l.SmartTranslateWrap = enabled
+	if l.LyricsControl == nil {
+		return l
+	}
+	for _, line := range l.LyricsControl.Lines {
+		line.SetSmartTranslateWrap(enabled)
+		line.GenerateTSImage()
+	}
+	l.LyricsControl.Scroll(l.LyricsControl.GetNowLyrics(), 0)
+	return l
+}
+
 func (l *LyricsComponent) Draw(screen *ebiten.Image, p *lyrics.Position) {
-	if screen == nil || l.LyricsControl == nil {
+	if screen == nil {
 		return
 	}
-	if l.Image == nil {
-		l.recreateImage()
-	}
-	l.Image.Clear()
-	l.LyricsControl.Draw(l.Image)
 
-	dr := &ebiten.DrawImageOptions{}
-	if p != nil {
-		dr.GeoM = lyrics.TransformToGeoM(p)
+	hasCurrentFrame := l.renderLyricsImage()
+	if l.switchFadeActive && l.TransitionImage != nil {
+		progress := crossfadeProgress(l.switchFadeStart, l.switchFadeDuration, time.Now())
+		if progress >= 1 {
+			l.finishSwitchFade()
+		} else {
+			l.drawToScreen(screen, l.TransitionImage, p, 1-progress)
+			if hasCurrentFrame {
+				l.drawToScreen(screen, l.Image, p, progress)
+			}
+			return
+		}
 	}
-	screen.DrawImage(l.Image, dr)
+	if hasCurrentFrame {
+		l.drawToScreen(screen, l.Image, p, 1)
+	}
 }
 
 func (l *LyricsComponent) Dispose() {
@@ -212,6 +401,19 @@ func (l *LyricsComponent) Dispose() {
 		l.Image = nil
 		released = true
 	}
+	if l.StaticImage != nil {
+		l.StaticImage.Deallocate()
+		l.StaticImage = nil
+		released = true
+	}
+	if l.TransitionImage != nil {
+		l.TransitionImage.Deallocate()
+		l.TransitionImage = nil
+		released = true
+	}
+	l.staticLayerSignature = 0
+	l.staticLayerReady = false
+	l.finishSwitchFade()
 	if released {
 		releaseLyricsMemory()
 	}

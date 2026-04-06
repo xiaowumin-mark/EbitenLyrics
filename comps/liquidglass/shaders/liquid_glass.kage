@@ -1,0 +1,234 @@
+//kage:unit pixels
+package main
+
+var Resolution vec2
+var Mouse vec2
+var MouseSpring vec2
+
+var ShowShape1 float
+var ShapeWidth float
+var ShapeHeight float
+var ShapeRadius float
+var ShapeRoundness float
+var MergeRate float
+
+var RefThickness float
+var RefFactor float
+var RefDispersion float
+var RefFresnelRange float
+var RefFresnelHardness float
+var RefFresnelFactor float
+
+var GlareRange float
+var GlareConvergence float
+var GlareOppositeFactor float
+var GlareFactor float
+var GlareHardness float
+var GlareAngle float
+
+var BlurEdge float
+var Tint vec4
+var Step float
+
+const PI = 3.14159265359
+const N_R = 1.0 - 0.02
+const N_G = 1.0
+const N_B = 1.0 + 0.02
+
+func superellipseCornerSDF(p vec2, r float, n float) float {
+	ap := abs(p)
+	v := pow(pow(ap.x, n)+pow(ap.y, n), 1.0/n)
+	return v - r
+}
+
+func roundedRectSDF(p vec2, center vec2, width float, height float, cornerRadius float, n float) float {
+	q := p - center
+	cr := clamp(cornerRadius, 0.0, min(width, height)*0.5-1.0)
+	d := abs(q) - vec2(width, height)*0.5
+
+	if d.x > -cr && d.y > -cr {
+		cornerCenter := sign(q) * (vec2(width, height)*0.5 - vec2(cr))
+		cornerP := q - cornerCenter
+		return superellipseCornerSDF(cornerP, cr, n)
+	}
+	return min(max(d.x, d.y), 0.0) + length(max(d, vec2(0.0)))
+}
+
+func smin(a float, b float, k float) float {
+	h := clamp(0.5+0.5*(b-a)/k, 0.0, 1.0)
+	return mix(b, a, h) - k*h*(1.0-h)
+}
+
+func mainSDF(p vec2) float {
+	c1 := vec2(Resolution.x*0.5, Resolution.y*0.5)
+	c2 := MouseSpring
+
+	d1 := 1e5
+	if ShowShape1 > 0.5 {
+		d1 = length(p-c1) - 100.0
+	}
+	d2 := roundedRectSDF(
+		p,
+		c2,
+		max(20.0, ShapeWidth),
+		max(20.0, ShapeHeight),
+		max(1.0, ShapeRadius),
+		clamp(ShapeRoundness, 2.0, 7.0),
+	)
+
+	k := max(0.001, MergeRate*min(max(20.0, ShapeWidth), max(20.0, ShapeHeight)))
+	return smin(d1, d2, k)
+}
+
+func getNormal(p vec2) vec2 {
+	eps := 1.0
+	dx := mainSDF(p+vec2(eps, 0.0)) - mainSDF(p-vec2(eps, 0.0))
+	dy := mainSDF(p+vec2(0.0, eps)) - mainSDF(p-vec2(0.0, eps))
+	return normalize(vec2(dx, dy) + vec2(0.0001))
+}
+
+func edgeFactorFromDistance(d float) float {
+	depth := -d
+	if depth <= 0.0 {
+		return 0.0
+	}
+	th := max(1.0, RefThickness)
+	if depth >= th {
+		return 0.0
+	}
+
+	xRatio := clamp(1.0-depth/th, 0.0, 1.0)
+	thetaI := asin(clamp(xRatio*xRatio, 0.0, 1.0))
+	thetaT := asin(clamp((1.0/max(1.0, RefFactor))*sin(thetaI), -0.999, 0.999))
+	ef := -tan(thetaT - thetaI)
+	return max(0.0, ef) * (2.2 + 0.8*sqrt(xRatio))
+}
+
+func fresnelFactor(d float) float {
+	rangeV := max(0.001, RefFresnelRange)
+	base := 1.0 + d/1500.0*pow(500.0/rangeV, 2.0) + RefFresnelHardness
+	base = max(0.0, base)
+	f := clamp(
+		pow(
+			base,
+			5.0,
+		),
+		0.0,
+		1.0,
+	)
+	return f * RefFresnelFactor
+}
+
+func glareFactorAt(d float, normal vec2) float {
+	rangeV := max(0.001, GlareRange)
+	baseGeo := 1.0 + d/1500.0*pow(500.0/rangeV, 2.0) + GlareHardness
+	baseGeo = max(0.0, baseGeo)
+	geo := clamp(
+		pow(
+			baseGeo,
+			5.0,
+		),
+		0.0,
+		1.0,
+	)
+
+	dir := normalize(vec2(cos(GlareAngle), sin(GlareAngle)) + vec2(0.0001))
+	nd := dot(normalize(normal), dir)
+	base := (0.5 + nd*0.5) * GlareFactor
+	if nd < 0.0 {
+		base *= max(0.0, GlareOppositeFactor)
+	}
+	ang := clamp(pow(clamp(base, 0.0, 1.0), 0.1+GlareConvergence*2.0), 0.0, 1.0)
+	return ang * geo
+}
+
+func sampleDispersion(localPos vec2, offset vec2, origin0 vec2, size vec2, blurMix float, dispersionScale float) vec3 {
+	dispersion := RefDispersion * max(0.0, dispersionScale)
+
+	pR := clamp(localPos+offset*(1.0-(N_R-1.0)*dispersion), vec2(0.5), size-vec2(0.5))
+	pG := clamp(localPos+offset*(1.0-(N_G-1.0)*dispersion), vec2(0.5), size-vec2(0.5))
+	pB := clamp(localPos+offset*(1.0-(N_B-1.0)*dispersion), vec2(0.5), size-vec2(0.5))
+
+	posR := origin0 + pR
+	posG := origin0 + pG
+	posB := origin0 + pB
+
+	bgR := imageSrc0UnsafeAt(posR).r
+	bgG := imageSrc0UnsafeAt(posG).g
+	bgB := imageSrc0UnsafeAt(posB).b
+
+	blR := imageSrc1UnsafeAt(posR).r
+	blG := imageSrc1UnsafeAt(posG).g
+	blB := imageSrc1UnsafeAt(posB).b
+
+	return vec3(
+		mix(bgR, blR, blurMix),
+		mix(bgG, blG, blurMix),
+		mix(bgB, blB, blurMix),
+	)
+}
+
+func Fragment(dstPos vec4, srcPos vec2, color vec4) vec4 {
+	origin0 := imageSrc0Origin()
+	size := imageSrc0Size()
+	local := srcPos - origin0
+	clampedLocal := clamp(local, vec2(0.5), size-vec2(0.5))
+	bgPixel := imageSrc0UnsafeAt(origin0 + clampedLocal)
+	p := local
+	d := mainSDF(p)
+
+	aa := 1.25
+	mask := 1.0 - smoothstep(0.0, aa, d)
+	if mask <= 0.0 {
+		return vec4(0.0)
+	}
+
+	normal := getNormal(p)
+	ef := edgeFactorFromDistance(d)
+	depth := max(0.0, -d)
+	edgeH := clamp(depth/max(1.0, RefThickness), 0.0, 1.0)
+	edgeBand := 1.0 - smoothstep(0.0, max(1.0, RefThickness*0.85), depth)
+
+	aspectFix := vec2(Resolution.y/max(1.0, Resolution.x), 1.0)
+	offsetScale := 0.22 + 1.85*edgeBand + 0.28*edgeH
+	offset := -normal * ef * offsetScale * aspectFix
+	blurMix := edgeH
+	if BlurEdge > 0.5 {
+		blurMix = 1.0
+	}
+
+	baseRGB := sampleDispersion(local, offset, origin0, size, blurMix, 1.25+edgeBand*1.35)
+	edgeRGB := sampleDispersion(local, offset*3.1, origin0, size, clamp(blurMix*0.65+0.35, 0.0, 1.0), 2.2+edgeBand*1.6)
+	baseRGB = mix(baseRGB, edgeRGB, clamp(edgeBand*0.84, 0.0, 1.0))
+
+	tinted := mix(baseRGB, Tint.rgb, clamp(Tint.a, 0.0, 1.0)*0.8)
+
+	fres := fresnelFactor(d)
+	tinted = mix(tinted, vec3(1.0), fres*0.7*length(normal))
+
+	glare := glareFactorAt(d, normal)
+	tinted = mix(tinted, vec3(1.0), glare*length(normal))
+
+	if Step < 1.0 {
+		sdfViz := 0.5 + 0.5*clamp(d/80.0, -1.0, 1.0)
+		return vec4(vec3(sdfViz), 1.0)
+	}
+	if Step < 2.0 {
+		return vec4(normal*0.5+0.5, 0.0, 1.0)
+	}
+	if Step < 3.0 {
+		return vec4(vec3(ef), 1.0)
+	}
+	if Step < 4.0 {
+		return vec4(baseRGB, 1.0)
+	}
+	if Step < 5.0 {
+		return vec4(vec3(fres), 1.0)
+	}
+	if Step < 6.0 {
+		return vec4(vec3(glare), 1.0)
+	}
+
+	outRGB := mix(bgPixel.rgb, tinted, clamp(mask, 0.0, 1.0))
+	return vec4(outRGB, 1.0) * color
+}

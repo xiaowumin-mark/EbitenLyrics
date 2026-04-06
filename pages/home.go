@@ -10,6 +10,7 @@ import (
 	"EbitenLyrics/debugpanel"
 	"EbitenLyrics/evbus"
 	f "EbitenLyrics/font"
+	"EbitenLyrics/lp"
 	"EbitenLyrics/lyrics"
 	"EbitenLyrics/router"
 	"EbitenLyrics/ttml"
@@ -52,8 +53,10 @@ type Home struct {
 	MeshRenderer  *bgrender.MeshGradientRenderer
 	meshLastTick  time.Time
 
-	FontSize float64
-	FD       float64
+	FontSize           float64
+	FD                 float64
+	UserScale          float64
+	SmartTranslateWrap bool
 
 	eventsBound bool
 
@@ -306,6 +309,25 @@ func (h *Home) setFD(fd float64) {
 	}
 }
 
+func (h *Home) setUserScale(scale float64) {
+	h.UserScale = math.Max(0.25, math.Min(4.0, scale))
+	lp.SetUserScale(h.UserScale)
+	if h.LyricsControl != nil && h.LyricsControl.LyricsControl != nil {
+		for _, line := range h.LyricsControl.LyricsControl.Lines {
+			if line == nil {
+				continue
+			}
+			line.Dispose()
+			line.Render()
+		}
+		w, he := ebiten.WindowSize()
+		h.LyricsControl.Resize(lp.FromLP(float64(w)), lp.FromLP(float64(he)))
+		if h.hasLatestProgress {
+			h.LyricsControl.Update(h.latestProgress)
+		}
+	}
+}
+
 func (h *Home) initFamilyChoices() {
 	choices := append([]string{}, f.DefaultFamilies()...)
 	if h.currentFamily != "" {
@@ -521,13 +543,16 @@ func (h *Home) debugSummaryText() string {
 		fmt.Sprintf("Italic: %v", h.fontItalic),
 		fmt.Sprintf("User Scroll: %v", h.isUserScrolling),
 		fmt.Sprintf("LowFreqVolume: %.2f", h.pendingLowFreqVolume),
-		"Shortcuts: Esc toggle panel, F5/F6 family, F7/F8 weight, F9 italic, F10 reload config, F11 fullscreen",
+		"Shortcuts: Esc toggle panel, F2 liquid test, F5/F6 family, F7/F8 weight, F9 italic, F10 reload config, F11 fullscreen",
 	}
 	return strings.Join(lines, "\n")
 }
 
 func (h *Home) setupDebugPanel() {
-	panel := debugpanel.New("Home Debug", image.Rect(18, 18, 360, 560))
+	panel := debugpanel.New(
+		"Home Debug",
+		image.Rect(lp.LPInt(18), lp.LPInt(18), lp.LPInt(360), lp.LPInt(560)),
+	)
 
 	panel.Group("Lyrics", true).
 		Description("Runtime tuning for lyric layout and movement.").
@@ -536,6 +561,9 @@ func (h *Home) setupDebugPanel() {
 		}).
 		Float("FD", &h.FD, 0.0001, 3, 0.01, 2, func(value float64) {
 			h.setFD(value)
+		}).
+		Bool("Smart TS Wrap", &h.SmartTranslateWrap, func(value bool) {
+			h.setSmartTranslateWrap(value)
 		})
 
 	panel.Group("Font", true).
@@ -565,6 +593,9 @@ func (h *Home) setupDebugPanel() {
 		})
 
 	panel.Group("Window", false).
+		Float("User Scale", &h.UserScale, 0.25, 4.0, 0.05, 2, func(value float64) {
+			h.setUserScale(value)
+		}).
 		Action("Toggle Fullscreen", func() {
 			ebiten.SetFullscreen(!ebiten.IsFullscreen())
 		})
@@ -585,6 +616,13 @@ func (h *Home) queueLyrics(lines []ttml.LyricLine) {
 	h.hasPendingLyrics = true
 	h.pendingLyrics = lines
 	h.pendingMu.Unlock()
+}
+
+func (h *Home) setSmartTranslateWrap(enabled bool) {
+	h.SmartTranslateWrap = enabled
+	if h.LyricsControl != nil {
+		h.LyricsControl.SetSmartTranslateWrap(enabled)
+	}
 }
 
 func (h *Home) queueProgress(progress time.Duration) {
@@ -686,12 +724,12 @@ func (h *Home) applyPendingEvents() {
 			h.Cover = nil
 		}
 		h.Cover = ebiten.NewImageFromImage(coverImage)
-		h.CoverPosition.W = float64(h.Cover.Bounds().Dx())
-		h.CoverPosition.H = float64(h.Cover.Bounds().Dy())
+		h.CoverPosition.W = lp.FromLP(float64(h.Cover.Bounds().Dx()))
+		h.CoverPosition.H = lp.FromLP(float64(h.Cover.Bounds().Dy()))
 		h.CoverPosition.OriginX = h.CoverPosition.W / 2
 		h.CoverPosition.OriginY = h.CoverPosition.H / 2
 		w, he := ebiten.WindowSize()
-		h.updateCoverTransform(w, he)
+		h.updateCoverTransform(lp.FromLP(float64(w)), lp.FromLP(float64(he)))
 		if h.MeshRenderer != nil {
 			if err := h.MeshRenderer.SetAlbum(coverImage); err != nil {
 				log.Printf("mesh renderer set album failed: %v", err)
@@ -724,7 +762,7 @@ func (h *Home) beginUserScroll() {
 
 func (h *Home) clampScrollTarget() {
 	_, wh := ebiten.WindowSize()
-	maxAbs := math.Max(200, float64(wh)*2.5)
+	maxAbs := math.Max(200, lp.FromLP(float64(wh))*2.5)
 	if h.manualScrollTarget > maxAbs {
 		h.manualScrollTarget = maxAbs
 	}
@@ -838,7 +876,7 @@ func (h *Home) bindEvents() {
 	})
 }
 
-func (h *Home) updateCoverTransform(w, he int) {
+func (h *Home) updateCoverTransform(w, he float64) {
 	if h.CoverPosition.W <= 0 || h.CoverPosition.H <= 0 {
 		return
 	}
@@ -846,11 +884,11 @@ func (h *Home) updateCoverTransform(w, he int) {
 		return
 	}
 
-	h.CoverPosition.TranslateX = (float64(w) - h.CoverPosition.W) / 2
-	h.CoverPosition.TranslateY = (float64(he) - h.CoverPosition.H) / 2
+	h.CoverPosition.TranslateX = (w - h.CoverPosition.W) / 2
+	h.CoverPosition.TranslateY = (he - h.CoverPosition.H) / 2
 
-	scaleX := float64(w) / h.CoverPosition.W
-	scaleY := float64(he) / h.CoverPosition.H
+	scaleX := w / h.CoverPosition.W
+	scaleY := he / h.CoverPosition.H
 	finalS := math.Max(scaleX, scaleY) * 1.4
 	h.CoverPosition.ScaleX = finalS
 	h.CoverPosition.ScaleY = finalS
@@ -867,6 +905,8 @@ func (h *Home) OnCreate() {
 	ww, hh := ebiten.WindowSize()
 	h.FontSize = 50
 	h.FD = 0.5
+	h.UserScale = lp.UserScale()
+	h.SmartTranslateWrap = true
 	h.fontWeight = h.FontRequest.Weight
 	h.fontItalic = h.FontRequest.Italic
 	h.currentFamily = ""
@@ -881,8 +921,17 @@ func (h *Home) OnCreate() {
 	}
 	h.initFamilyChoices()
 
-	h.LyricsControl = LyricsComponent.NewLyricsComponent(h.AnimateManager, h.FontManager, h.FontRequest, float64(ww), float64(hh), h.FontSize, h.FD)
+	h.LyricsControl = LyricsComponent.NewLyricsComponent(
+		h.AnimateManager,
+		h.FontManager,
+		h.FontRequest,
+		lp.FromLP(float64(ww)),
+		lp.FromLP(float64(hh)),
+		h.FontSize,
+		h.FD,
+	)
 	h.LyricsControl.Init()
+	h.LyricsControl.SetSmartTranslateWrap(h.SmartTranslateWrap)
 	meshRenderer, err := bgrender.NewMeshGradientRenderer(ww, hh)
 	if err != nil {
 		log.Printf("create mesh renderer failed: %v", err)
@@ -997,6 +1046,10 @@ func (h *Home) Update() error {
 	if !h.debugInputCaptured && inpututil.IsKeyJustPressed(ebiten.KeyF11) {
 		ebiten.SetFullscreen(!ebiten.IsFullscreen())
 	}
+	if !h.debugInputCaptured && inpututil.IsKeyJustPressed(ebiten.KeyF2) {
+		router.Go("liquid_glass_test", nil)
+		return nil
+	}
 
 	h.updateMemoryPanel()
 
@@ -1025,10 +1078,10 @@ func (h *Home) Draw(screen *ebiten.Image) {
 func (h *Home) OnResize(w, he int, isFirst bool) {
 	log.Println("Home OnResize", w, he, isFirst)
 	if !isFirst && h.LyricsControl != nil {
-		h.LyricsControl.Resize(float64(w), float64(he))
+		h.LyricsControl.Resize(lp.FromLP(float64(w)), lp.FromLP(float64(he)))
 	}
 	if h.MeshRenderer != nil {
 		h.MeshRenderer.Resize(w, he)
 	}
-	h.updateCoverTransform(w, he)
+	h.updateCoverTransform(lp.FromLP(float64(w)), lp.FromLP(float64(he)))
 }

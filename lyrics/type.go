@@ -15,10 +15,40 @@ import (
 type LineStatus int
 
 const (
-	Normal LineStatus = iota
-	Hot
-	Buffered
+	LineStatusHidden LineStatus = iota
+	LineStatusPreviewStatic
+	LineStatusPreviewScrolling
+	LineStatusActiveEnter
+	LineStatusActivePlaying
+	LineStatusActiveExit
 )
+
+func (s LineStatus) UsesPreviewBitmap() bool {
+	switch s {
+	case LineStatusPreviewStatic, LineStatusPreviewScrolling:
+		return true
+	default:
+		return false
+	}
+}
+
+func (s LineStatus) RequiresRealtimeRender() bool {
+	switch s {
+	case LineStatusActiveEnter, LineStatusActivePlaying, LineStatusActiveExit:
+		return true
+	default:
+		return false
+	}
+}
+
+func (s LineStatus) CanStartExit() bool {
+	switch s {
+	case LineStatusActiveEnter, LineStatusActivePlaying:
+		return true
+	default:
+		return false
+	}
+}
 
 // LyricRenderMode 表示当前歌词渲染模式。
 // RenderModeSyllable: 常规逐字/逐词卡拉 OK。
@@ -67,8 +97,9 @@ type Line struct {
 	OuterSyllableElements []*SyllableElement
 	TranslatedText        string
 
-	BackgroundLines []*Line
-	Participle      [][]int
+	BackgroundLines    []*Line
+	Participle         [][]int
+	SmartTranslateWrap bool
 
 	// RenderMode 由加载阶段统一判定后写入，布局和动画直接读取该值。
 	RenderMode LyricRenderMode
@@ -91,6 +122,9 @@ type Line struct {
 	isShow bool
 
 	Status LineStatus
+
+	imageDirty          bool
+	StatusSettleAnimate *anim.Tween
 
 	ScrollAnimate        *anim.Tween
 	AlphaAnimate         *anim.KeyframeAnimation

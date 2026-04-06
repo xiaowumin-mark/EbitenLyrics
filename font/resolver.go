@@ -1,6 +1,7 @@
 package font
 
 import (
+	"EbitenLyrics/lp"
 	"bytes"
 	"encoding/binary"
 	"errors"
@@ -130,9 +131,10 @@ type FontManager struct {
 	glyphCache   *lru.Cache[glyphCacheKey, bool]
 	contentCache *lru.Cache[contentSelectionKey, []ResolvedFont]
 
-	systemIndexOnce sync.Once
-	systemIndex     []fontRecord
-	systemIndexErr  error
+	systemIndexOnce  sync.Once
+	systemIndex      []fontRecord
+	systemIndexErr   error
+	systemIndexReady bool
 
 	systemDirs       []string
 	systemFallbacks  []string
@@ -154,7 +156,7 @@ func NewFontManager(sourceCacheSize int) *FontManager {
 	})
 	glyphCache, _ := lru.New[glyphCacheKey, bool](glyphSupportCacheSize)
 	contentCache, _ := lru.New[contentSelectionKey, []ResolvedFont](contentSelectionCacheSize)
-	return &FontManager{
+	manager := &FontManager{
 		customPaths:      map[string]string{},
 		fallbackRules:    map[string][]string{},
 		familyCache:      map[string][]fontRecord{},
@@ -168,6 +170,8 @@ func NewFontManager(sourceCacheSize int) *FontManager {
 		systemFallbacks:  systemFallbackFamilies(),
 		lastResortSource: mustBuildLastResortSource(),
 	}
+	manager.postInit()
+	return manager
 }
 
 func cloneResolvedFont(font *ResolvedFont) *ResolvedFont {
@@ -258,31 +262,90 @@ func systemFontDirs() []string {
 func systemFallbackFamilies() []string {
 	switch runtime.GOOS {
 	case "windows":
-		return []string{
+		return normalizeFamilies([]string{
 			"Segoe UI",
+			"Segoe UI Variable",
 			"Microsoft YaHei UI",
 			"Microsoft YaHei",
+			"Microsoft JhengHei UI",
+			"Microsoft JhengHei",
+			"Malgun Gothic",
+			"Yu Gothic UI",
+			"Meiryo",
+			"Leelawadee UI",
+			"Nirmala UI",
+			"Ebrima",
+			"Khmer UI",
+			"Lao UI",
+			"Myanmar Text",
+			"Javanese Text",
+			"DokChampa",
+			"Iskoola Pota",
+			"Gadugi",
+			"Plantagenet Cherokee",
+			"Sylfaen",
 			"Arial",
 			"Segoe UI Symbol",
+			"Segoe UI Emoji",
+			"Segoe Fluent Icons",
+			"Cambria Math",
 			"Arial Unicode MS",
-		}
-	case "darwin":
-		return []string{
-			"SF Pro",
-			"PingFang SC",
-			"Hiragino Sans GB",
-			"Apple Symbols",
-			"Helvetica Neue",
-		}
-	default:
-		return []string{
 			"Noto Sans",
 			"Noto Sans CJK SC",
+			"Noto Sans CJK TC",
+			"Noto Sans CJK JP",
+			"Noto Sans CJK KR",
 			"Noto Sans Symbols 2",
+			"Noto Color Emoji",
+		})
+	case "darwin":
+		return normalizeFamilies([]string{
+			"SF Pro",
+			"SF Pro Text",
+			"SF Pro Display",
+			"PingFang SC",
+			"PingFang TC",
+			"PingFang HK",
+			"Hiragino Sans",
+			"Hiragino Sans GB",
+			"Hiragino Kaku Gothic ProN",
+			"Hiragino Mincho ProN",
+			"Apple SD Gothic Neo",
+			"Arial Unicode MS",
+			"Apple Symbols",
+			"Apple Color Emoji",
+			"Helvetica Neue",
+			"Noto Sans",
+			"Noto Sans CJK SC",
+			"Noto Sans CJK TC",
+			"Noto Sans CJK JP",
+			"Noto Sans CJK KR",
+			"Noto Sans Symbols 2",
+		})
+	default:
+		return normalizeFamilies([]string{
+			"Noto Sans",
+			"Noto Sans CJK SC",
+			"Noto Sans CJK TC",
+			"Noto Sans CJK JP",
+			"Noto Sans CJK KR",
+			"Noto Sans Arabic",
+			"Noto Sans Hebrew",
+			"Noto Sans Thai",
+			"Noto Sans Devanagari",
+			"Noto Sans Armenian",
+			"Noto Sans Georgian",
+			"Noto Sans Ethiopic",
+			"Noto Sans Symbols 2",
+			"Noto Color Emoji",
 			"Source Han Sans SC",
+			"Source Han Sans TC",
+			"Source Han Sans JP",
+			"Source Han Sans KR",
 			"DejaVu Sans",
 			"WenQuanYi Micro Hei",
-		}
+			"Arial Unicode MS",
+		})
 	}
 }
 
@@ -482,7 +545,7 @@ func (m *FontManager) GetFaceForText(req FontRequest, size float64, content stri
 		if font == nil || font.Source == nil {
 			continue
 		}
-		faces = append(faces, &text.GoTextFace{Source: font.Source, Size: size})
+		faces = append(faces, &text.GoTextFace{Source: font.Source, Size: lp.LP(size)})
 	}
 	if len(faces) == 0 {
 		return nil, errors.New("font chain contains no usable face")

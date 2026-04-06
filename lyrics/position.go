@@ -4,6 +4,7 @@ package lyrics
 // 主要职责：统一描述平移、缩放、旋转、透明度和包围盒计算。
 
 import (
+	"EbitenLyrics/lp"
 	"math"
 
 	"github.com/hajimehoshi/ebiten/v2"
@@ -32,7 +33,7 @@ func TransformToGeoM(p *Position) ebiten.GeoM {
 	m := ebiten.GeoM{}
 
 	// 1. 设置中心点：先将图像的中心点移到 (0,0)
-	m.Translate(-p.OriginX, -p.OriginY)
+	m.Translate(-lp.LP(p.OriginX), -lp.LP(p.OriginY))
 
 	// 2. 执行缩放
 	m.Scale(p.ScaleX, p.ScaleY)
@@ -44,7 +45,10 @@ func TransformToGeoM(p *Position) ebiten.GeoM {
 	// 4. 将中心点移回到它在世界坐标中应该在的位置
 	// 这里直接加上 (X + OriginX) 才能保证物体中心就在 X, Y 指定的位置
 	// 或者按照你的逻辑：平移到 X, Y 加上偏移
-	m.Translate(p.X+p.TranslateX+p.OriginX, p.Y+p.TranslateY+p.OriginY)
+	m.Translate(
+		lp.LP(p.X+p.TranslateX+p.OriginX),
+		lp.LP(p.Y+p.TranslateY+p.OriginY),
+	)
 
 	return m
 }
@@ -69,10 +73,12 @@ type Point struct {
 func GetCorners(p *Position) [4]Point {
 	m := TransformToGeoM(p)
 
-	x0, y0 := m.Apply(0, 0)     // 左上
-	x1, y1 := m.Apply(p.W, 0)   // 右上
-	x2, y2 := m.Apply(p.W, p.H) // 右下
-	x3, y3 := m.Apply(0, p.H)   // 左下
+	x0, y0 := m.Apply(0, 0) // 左上
+	pw := lp.LP(p.W)
+	ph := lp.LP(p.H)
+	x1, y1 := m.Apply(pw, 0)  // 右上
+	x2, y2 := m.Apply(pw, ph) // 右下
+	x3, y3 := m.Apply(0, ph)  // 左下
 
 	return [4]Point{
 		{X: x0, Y: y0},

@@ -1,6 +1,7 @@
 package font
 
 import (
+	"EbitenLyrics/lp"
 	"sync"
 
 	"github.com/hajimehoshi/ebiten/v2/text/v2"
@@ -24,7 +25,7 @@ func FaceFromSource(source *text.GoTextFaceSource, size float64) text.Face {
 	}
 	return &text.GoTextFace{
 		Source: source,
-		Size:   size,
+		Size:   lp.LP(size),
 	}
 }
 

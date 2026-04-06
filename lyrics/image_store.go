@@ -2,6 +2,7 @@ package lyrics
 
 import (
 	ft "EbitenLyrics/font"
+	"EbitenLyrics/lp"
 	"image/color"
 	"math"
 	"reflect"
@@ -98,9 +99,10 @@ func (s *imageStore) acquireTextMask(text string, fontManager *ft.FontManager, r
 	if text == "" {
 		text = " "
 	}
+	physicalSize := lp.LP(size)
 	key := textMaskKey{
 		text: text,
-		font: fontKeyFromRequest(fontManager, req, size),
+		font: fontKeyFromRequest(fontManager, req, physicalSize),
 		w:    safeImageLength(w),
 		h:    safeImageLength(h),
 	}

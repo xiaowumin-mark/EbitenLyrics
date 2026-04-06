@@ -5,7 +5,7 @@ package lyrics
 
 import (
 	ft "EbitenLyrics/font"
-	"math"
+	"EbitenLyrics/lp"
 	"strings"
 	"time"
 
@@ -19,22 +19,25 @@ func NewLine(st, et time.Duration, isduet, isbg bool, ts string, fontManager *ft
 	pos.SetScaleX(baseScale)
 	pos.SetScaleY(baseScale)
 	return &Line{
-		StartTime:       st,
-		EndTime:         et,
-		Syllables:       []*LineSyllable{},
-		Text:            "",
-		Image:           nil,
-		TranslateImage:  nil,
-		IsDuet:          isduet,
-		IsBackground:    isbg,
-		TranslatedText:  ts,
-		BackgroundLines: []*Line{},
-		Participle:      [][]int{},
-		fontsize:        fs,
-		isShow:          false,
-		FontManager:     fontManager,
-		FontRequest:     req.Normalized(),
-		Position:        pos,
+		StartTime:          st,
+		EndTime:            et,
+		Syllables:          []*LineSyllable{},
+		Text:               "",
+		Image:              nil,
+		TranslateImage:     nil,
+		IsDuet:             isduet,
+		IsBackground:       isbg,
+		TranslatedText:     ts,
+		BackgroundLines:    []*Line{},
+		Participle:         [][]int{},
+		SmartTranslateWrap: true,
+		fontsize:           fs,
+		isShow:             false,
+		Status:             LineStatusHidden,
+		imageDirty:         true,
+		FontManager:        fontManager,
+		FontRequest:        req.Normalized(),
+		Position:           pos,
 	}
 }
 
@@ -68,10 +71,7 @@ func (l *Line) translatedFace() text.Face {
 }
 
 func safeImageLength(v float64) int {
-	if math.IsNaN(v) || math.IsInf(v, 0) || v <= 0 {
-		return 1
-	}
-	return int(math.Ceil(v))
+	return lp.LPSize(v)
 }
 
 func (l *Line) GetSyllables() []*LineSyllable {
@@ -103,6 +103,7 @@ func (l *Line) SetSyllables(syllables []*LineSyllable) {
 		}
 	}
 	l.OuterSyllableElements = outerSyllableElements
+	l.markImageDirty()
 }
 
 func (l *Line) GetFace(isc bool) text.Face {
@@ -124,6 +125,17 @@ func (l *Line) GetText() string {
 
 func (l *Line) SetTranslatedText(ts string) {
 	l.TranslatedText = ts
+	l.markImageDirty()
+}
+
+func (l *Line) SetSmartTranslateWrap(enabled bool) {
+	l.SmartTranslateWrap = enabled
+	for _, bg := range l.BackgroundLines {
+		if bg == nil {
+			continue
+		}
+		bg.SetSmartTranslateWrap(enabled)
+	}
 }
 
 func (l *Line) GetTranslatedText() string {
@@ -132,6 +144,7 @@ func (l *Line) GetTranslatedText() string {
 
 func (l *Line) SetPadding(padding float64) {
 	l.Padding = padding
+	l.markImageDirty()
 }
 
 func (l *Line) GetPadding() float64 {
@@ -172,10 +185,12 @@ func (l *Line) GetTranslateImage() *ebiten.Image {
 
 func (l *Line) SetImage(img *ebiten.Image) {
 	l.Image = img
+	l.markImageDirty()
 }
 
 func (l *Line) SetTranslateImage(img *ebiten.Image) {
 	l.TranslateImage = img
+	l.markImageDirty()
 }
 
 func (l *Line) GetPosition() *Position {
@@ -197,8 +212,27 @@ func (l *Line) SetFD(fd float64) {
 	for _, line := range l.BackgroundLines {
 		line.SetFD(fd)
 	}
+	l.markImageDirty()
 }
 
 func (l *Lyrics) GetRenderedindex() []int {
 	return l.renderIndex
+}
+
+func (l *Line) markImageDirty() {
+	if l == nil {
+		return
+	}
+	l.imageDirty = true
+}
+
+func (l *Line) setStatus(status LineStatus) {
+	if l == nil || l.Status == status {
+		return
+	}
+	prev := l.Status
+	l.Status = status
+	if status.UsesPreviewBitmap() && !prev.UsesPreviewBitmap() {
+		l.markImageDirty()
+	}
 }

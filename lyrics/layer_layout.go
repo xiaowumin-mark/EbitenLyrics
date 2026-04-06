@@ -5,6 +5,7 @@ package lyrics
 
 import (
 	ft "EbitenLyrics/font"
+	"EbitenLyrics/lp"
 	"EbitenLyrics/ttml"
 	"image/color"
 	"strings"
@@ -130,6 +131,7 @@ func (LayoutLayer) GenerateLineTranslateImage(l *Line) {
 			l.TranslateImage.Deallocate()
 			l.TranslateImage = nil
 		}
+		l.markImageDirty()
 		return
 	}
 
@@ -151,6 +153,16 @@ func (LayoutLayer) GenerateLineTranslateImage(l *Line) {
 		1,
 		align,
 	)
+	if l.SmartTranslateWrap {
+		positions, h = AutoLayoutSmart(
+			l.TranslatedText,
+			translateFace,
+			maxWidth,
+			l.lineHeight,
+			1,
+			align,
+		)
+	}
 	l.TranslateImageW = maxWidth
 	l.TranslateImageH = h
 
@@ -168,11 +180,12 @@ func (LayoutLayer) GenerateLineTranslateImage(l *Line) {
 	l.TranslateImage = ebiten.NewImage(safeImageLength(maxWidth), safeImageLength(h))
 	for _, pos := range positions {
 		op := &text.DrawOptions{}
-		op.GeoM.Translate(pos.X, pos.Y)
+		op.GeoM.Translate(lp.LP(pos.X), lp.LP(pos.Y))
 		op.ColorScale.ScaleWithColor(color.White)
 		op.ColorScale.ScaleAlpha(0.4)
 		text.Draw(l.TranslateImage, pos.Text, translateFace, op)
 	}
+	l.markImageDirty()
 }
 
 func (LayoutLayer) SetLineFont(l *Line, fontManager *ft.FontManager, req ft.FontRequest) {
@@ -298,7 +311,7 @@ func SplitBySpace(line *Line, includeSpaces bool) [][]int {
 	for _, element := range line.Syllables {
 		words = append(words, element.Syllable)
 	}
-	return splitLyricsIntoGroups(words, includeSpaces)
+	return splitLyricsIntoGroupsSmart(words, includeSpaces)
 }
 
 func SplitBySpaceTTML(line []ttml.LyricWord, includeSpaces bool) [][]int {
@@ -306,7 +319,79 @@ func SplitBySpaceTTML(line []ttml.LyricWord, includeSpaces bool) [][]int {
 	for _, element := range line {
 		words = append(words, element.Word)
 	}
-	return splitLyricsIntoGroups(words, includeSpaces)
+	return splitLyricsIntoGroupsSmart(words, includeSpaces)
+}
+
+func splitLyricsIntoGroupsSmart(words []string, includeSpaces bool) [][]int {
+	var result [][]int
+	var currentWordIndices []int
+
+	flush := func() {
+		if len(currentWordIndices) > 0 {
+			result = append(result, currentWordIndices)
+			currentWordIndices = nil
+		}
+	}
+
+	for index, word := range words {
+		if len(word) > 0 && strings.TrimSpace(word) == "" {
+			flush()
+			if includeSpaces {
+				result = append(result, []int{index})
+			}
+			continue
+		}
+
+		if isSingleChineseChar(word) {
+			flush()
+			result = append(result, []int{index})
+			continue
+		}
+
+		if isStandaloneLayoutPunctuation(word) {
+			currentWordIndices = append(currentWordIndices, index)
+			flush()
+			continue
+		}
+
+		currentWordIndices = append(currentWordIndices, index)
+		if hasTrailingLayoutSpace(word) || endsWithLayoutBoundaryPunctuation(word) {
+			flush()
+		}
+	}
+
+	flush()
+	return result
+}
+
+func hasTrailingLayoutSpace(word string) bool {
+	if word == "" {
+		return false
+	}
+	runes := []rune(word)
+	return len(runes) > 0 && unicode.IsSpace(runes[len(runes)-1])
+}
+
+func isStandaloneLayoutPunctuation(word string) bool {
+	trimmed := strings.TrimSpace(word)
+	if trimmed == "" {
+		return false
+	}
+	for _, r := range trimmed {
+		if !unicode.IsPunct(r) && !unicode.IsSymbol(r) {
+			return false
+		}
+	}
+	return true
+}
+
+func endsWithLayoutBoundaryPunctuation(word string) bool {
+	runes := []rune(strings.TrimSpace(word))
+	if len(runes) == 0 {
+		return false
+	}
+	last := runes[len(runes)-1]
+	return strings.ContainsRune(".,!?;:，。！？；：、)]}）】》」』”", last)
 }
 
 func isChineseChar(c rune) bool {
