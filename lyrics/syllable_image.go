@@ -4,11 +4,12 @@ package lyrics
 // 主要职责：创建遮罩、渐变、高亮资源并按偏移量进行混合绘制。
 
 import (
-	ft "EbitenLyrics/font"
-	"EbitenLyrics/lp"
 	"errors"
 	"image/color"
 	"math"
+
+	ft "github.com/xiaowumin-mark/EbitenLyrics/font"
+	"github.com/xiaowumin-mark/EbitenLyrics/lp"
 
 	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/hajimehoshi/ebiten/v2/text/v2"

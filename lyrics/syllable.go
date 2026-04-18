@@ -4,9 +4,10 @@ package lyrics
 // 主要职责：封装单个音节的时间轴、图片资源和透明度控制。
 
 import (
-	ft "EbitenLyrics/font"
 	"image/color"
 	"time"
+
+	ft "github.com/xiaowumin-mark/EbitenLyrics/font"
 
 	"github.com/hajimehoshi/ebiten/v2"
 )

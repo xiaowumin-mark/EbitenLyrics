@@ -4,15 +4,17 @@ package LyricsComponent
 // 主要职责：管理歌词对象的创建、更新、缩放、绘制与资源释放。
 
 import (
-	"EbitenLyrics/anim"
-	ft "EbitenLyrics/font"
-	"EbitenLyrics/lp"
-	"EbitenLyrics/lyrics"
-	"EbitenLyrics/ttml"
 	"log"
 	"runtime"
 	"runtime/debug"
 	"time"
+
+	"github.com/xiaowumin-mark/EbitenLyrics/anim"
+	ft "github.com/xiaowumin-mark/EbitenLyrics/font"
+	"github.com/xiaowumin-mark/EbitenLyrics/lp"
+	"github.com/xiaowumin-mark/EbitenLyrics/lyrics"
+
+	ttml "github.com/xiaowumin-mark/EbitenLyrics/ttml"
 
 	"github.com/hajimehoshi/ebiten/v2"
 )
@@ -259,6 +261,15 @@ func (l *LyricsComponent) SetLyrics(ls []ttml.LyricLine) *LyricsComponent {
 		l.recreateImage()
 	}
 
+	// 重新处理歌词的的结束时间
+	for i := range ls {
+		for _, bg := range ls[i].BGs {
+			if ls[i].EndTime < bg.EndTime {
+				ls[i].EndTime = bg.EndTime
+			}
+		}
+	}
+
 	control, err := lyrics.New(ls, l.Width, l.FontManager, l.FontRequest, l.FontSize, l.FD)
 	if err != nil {
 		log.Printf("lyrics init failed: %v", err)
@@ -287,6 +298,7 @@ func (l *LyricsComponent) SetLyrics(ls []ttml.LyricLine) *LyricsComponent {
 	}
 	return l
 }
+
 func (l *LyricsComponent) Update(t time.Duration) {
 	if l.LyricsControl == nil {
 		return
@@ -316,7 +328,11 @@ func (l *LyricsComponent) SetFontSize(fs float64) *LyricsComponent {
 	for _, line := range l.LyricsControl.Lines {
 		line.SetFontSize(fs)
 	}
+	currentPosition := l.LyricsControl.Position
+	l.LyricsControl.Update(currentPosition)
 	l.LyricsControl.Scroll(l.LyricsControl.GetNowLyrics(), 0)
+	l.staticLayerSignature = 0
+	l.staticLayerReady = false
 	return l
 }
 
@@ -329,7 +345,11 @@ func (l *LyricsComponent) SetFont(fontManager *ft.FontManager, req ft.FontReques
 	for _, line := range l.LyricsControl.Lines {
 		line.SetFont(fontManager, l.FontRequest)
 	}
+	currentPosition := l.LyricsControl.Position
+	l.LyricsControl.Update(currentPosition)
 	l.LyricsControl.Scroll(l.LyricsControl.GetNowLyrics(), 0)
+	l.staticLayerSignature = 0
+	l.staticLayerReady = false
 	return l
 }
 

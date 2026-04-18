@@ -4,17 +4,6 @@ package pages
 // 主要职责：接收事件、更新渲染组件、处理滚轮与字体配置热切换。
 
 import (
-	"EbitenLyrics/anim"
-	"EbitenLyrics/bgrender"
-	LyricsComponent "EbitenLyrics/comps/lyrics"
-	"EbitenLyrics/debugpanel"
-	"EbitenLyrics/evbus"
-	f "EbitenLyrics/font"
-	"EbitenLyrics/lp"
-	"EbitenLyrics/lyrics"
-	"EbitenLyrics/router"
-	"EbitenLyrics/ttml"
-	"EbitenLyrics/ws"
 	"errors"
 	"fmt"
 	"image"
@@ -25,6 +14,19 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/xiaowumin-mark/EbitenLyrics/anim"
+	"github.com/xiaowumin-mark/EbitenLyrics/bgrender"
+	LyricsComponent "github.com/xiaowumin-mark/EbitenLyrics/comps/lyrics"
+	"github.com/xiaowumin-mark/EbitenLyrics/debugpanel"
+	"github.com/xiaowumin-mark/EbitenLyrics/evbus"
+	f "github.com/xiaowumin-mark/EbitenLyrics/font"
+	"github.com/xiaowumin-mark/EbitenLyrics/lp"
+	"github.com/xiaowumin-mark/EbitenLyrics/lyrics"
+	"github.com/xiaowumin-mark/EbitenLyrics/router"
+	"github.com/xiaowumin-mark/EbitenLyrics/ws"
+
+	ttml "github.com/xiaowumin-mark/EbitenLyrics/ttml"
 
 	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/hajimehoshi/ebiten/v2/inpututil"
@@ -298,6 +300,9 @@ func (h *Home) updateMemoryPanel() {
 func (h *Home) setFontSize(size float64) {
 	h.FontSize = math.Max(8, size)
 	if h.LyricsControl != nil {
+		if h.hasLatestProgress {
+			h.LyricsControl.Update(h.latestProgress)
+		}
 		h.LyricsControl.SetFontSize(h.FontSize)
 	}
 }
@@ -444,6 +449,11 @@ func (h *Home) applyFontRequest(req f.FontRequest) {
 	h.setCurrentFamilyChoice(resolved.Primary.Family)
 	if h.LyricsControl != nil {
 		h.LyricsControl.SetFont(h.FontManager, req)
+		if h.hasLatestProgress {
+			h.LyricsControl.Update(h.latestProgress)
+		} else if h.LyricsControl.LyricsControl != nil {
+			h.LyricsControl.Update(h.LyricsControl.LyricsControl.Position)
+		}
 	}
 
 	log.Printf(

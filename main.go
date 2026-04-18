@@ -4,17 +4,18 @@ package main
 // 主要职责：创建全局 Game 状态，并把窗口生命周期转发给当前场景。
 
 import (
-	"EbitenLyrics/anim"
-	f "EbitenLyrics/font"
-	"EbitenLyrics/lp"
-	"EbitenLyrics/pages"
-	"EbitenLyrics/router"
-	"EbitenLyrics/ws"
 	"errors"
 	"log"
 	"os"
 	"strings"
 	"time"
+
+	"github.com/xiaowumin-mark/EbitenLyrics/anim"
+	f "github.com/xiaowumin-mark/EbitenLyrics/font"
+	"github.com/xiaowumin-mark/EbitenLyrics/lp"
+	"github.com/xiaowumin-mark/EbitenLyrics/pages"
+	"github.com/xiaowumin-mark/EbitenLyrics/router"
+	"github.com/xiaowumin-mark/EbitenLyrics/ws"
 
 	"github.com/hajimehoshi/ebiten/v2"
 )
@@ -105,6 +106,8 @@ func main() {
 	lp.SetUserScale(1.0)
 
 	ebiten.SetWindowSize(lp.LPInt(1100), lp.LPInt(670))
+	//ebiten.SetWindowSize(lp.LPInt(1125/2), lp.LPInt(2434/2))
+
 	game.animMgr = anim.NewManager(false)
 
 	router.Add("home", &pages.Home{
@@ -130,13 +133,15 @@ func main() {
 	ebiten.SetWindowTitle("Ebiten Lyrics")
 	ebiten.SetVsyncEnabled(true)
 	ebiten.SetFullscreen(false)
-	ebiten.SetTPS(60)
+	//ebiten.SetTPS(60)
 	ebiten.SetWindowResizingMode(ebiten.WindowResizingModeEnabled)
 
+	ebiten.SetWindowDecorated(true)
 	go ws.Initws()
 	if err := ebiten.RunGameWithOptions(&game, &ebiten.RunGameOptions{
 		X11ClassName:    "Ebiten Lyrics",
 		X11InstanceName: "Ebiten Lyrics",
+		SingleThread:    true,
 	}); err != nil {
 		log.Fatal(err)
 	}

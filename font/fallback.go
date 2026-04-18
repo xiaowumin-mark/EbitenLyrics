@@ -1,8 +1,9 @@
 package font
 
 import (
-	"EbitenLyrics/lp"
 	"errors"
+
+	"github.com/xiaowumin-mark/EbitenLyrics/lp"
 
 	gotextfont "github.com/go-text/typesetting/font"
 	"github.com/hajimehoshi/ebiten/v2/text/v2"

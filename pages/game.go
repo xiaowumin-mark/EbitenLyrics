@@ -4,16 +4,18 @@ package pages
 // 主要职责：加载测试歌词并驱动基础渲染流程。
 
 import (
-	"EbitenLyrics/anim"
-	f "EbitenLyrics/font"
-	"EbitenLyrics/lp"
-	"EbitenLyrics/lyrics"
-	"EbitenLyrics/router"
-	"EbitenLyrics/ttml"
 	"fmt"
 	"log"
 	"os"
 	"time"
+
+	"github.com/xiaowumin-mark/EbitenLyrics/anim"
+	f "github.com/xiaowumin-mark/EbitenLyrics/font"
+	"github.com/xiaowumin-mark/EbitenLyrics/lp"
+	"github.com/xiaowumin-mark/EbitenLyrics/lyrics"
+	"github.com/xiaowumin-mark/EbitenLyrics/router"
+
+	ttml "github.com/xiaowumin-mark/EbitenLyrics/ttml"
 
 	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/hajimehoshi/ebiten/v2/ebitenutil"

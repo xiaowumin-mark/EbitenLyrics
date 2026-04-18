@@ -1,9 +1,10 @@
 package lyrics
 
 import (
-	ft "EbitenLyrics/font"
 	"strings"
 	"testing"
+
+	ft "github.com/xiaowumin-mark/EbitenLyrics/font"
 
 	"github.com/hajimehoshi/ebiten/v2/text/v2"
 )

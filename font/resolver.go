@@ -1,7 +1,6 @@
 package font
 
 import (
-	"EbitenLyrics/lp"
 	"bytes"
 	"encoding/binary"
 	"errors"
@@ -14,6 +13,8 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+
+	"github.com/xiaowumin-mark/EbitenLyrics/lp"
 
 	"github.com/edsrzf/mmap-go"
 	"github.com/hajimehoshi/ebiten/v2/text/v2"

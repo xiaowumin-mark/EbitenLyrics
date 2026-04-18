@@ -1,7 +1,6 @@
 package liquidglass
 
 import (
-	"EbitenLyrics/filters"
 	"bytes"
 	_ "embed"
 	"fmt"
@@ -12,6 +11,8 @@ import (
 	"math"
 	"os"
 	"time"
+
+	"github.com/xiaowumin-mark/EbitenLyrics/filters"
 
 	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/hajimehoshi/ebiten/v2/ebitenutil"

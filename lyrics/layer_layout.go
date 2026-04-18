@@ -4,12 +4,13 @@ package lyrics
 // 主要职责：生成行图像、翻译图像并在尺寸变化时重排内容。
 
 import (
-	ft "EbitenLyrics/font"
-	"EbitenLyrics/lp"
-	"EbitenLyrics/ttml"
 	"image/color"
 	"strings"
 	"unicode"
+
+	ft "github.com/xiaowumin-mark/EbitenLyrics/font"
+	"github.com/xiaowumin-mark/EbitenLyrics/lp"
+	"github.com/xiaowumin-mark/EbitenLyrics/ttml"
 
 	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/hajimehoshi/ebiten/v2/text/v2"

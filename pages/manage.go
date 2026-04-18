@@ -4,10 +4,11 @@ package pages
 // 主要职责：承载后续管理界面或工具页面的生命周期实现。
 
 import (
-	"EbitenLyrics/anim"
-	f "EbitenLyrics/font"
-	"EbitenLyrics/router"
 	"log"
+
+	"github.com/xiaowumin-mark/EbitenLyrics/anim"
+	f "github.com/xiaowumin-mark/EbitenLyrics/font"
+	"github.com/xiaowumin-mark/EbitenLyrics/router"
 
 	"github.com/hajimehoshi/ebiten/v2"
 )

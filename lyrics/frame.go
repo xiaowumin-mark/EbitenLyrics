@@ -4,9 +4,10 @@ package lyrics
 // 主要职责：为逐字高亮和背景歌词效果构造动画帧序列。
 
 import (
-	"EbitenLyrics/anim"
 	"math"
 	"time"
+
+	"github.com/xiaowumin-mark/EbitenLyrics/anim"
 )
 
 // useRealtimeOffsetFormula controls whether to compute karaoke offsets per-frame.

@@ -1,8 +1,9 @@
 package font
 
 import (
-	"EbitenLyrics/lp"
 	"sync"
+
+	"github.com/xiaowumin-mark/EbitenLyrics/lp"
 
 	"github.com/hajimehoshi/ebiten/v2/text/v2"
 )

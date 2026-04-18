@@ -4,7 +4,6 @@ package ws
 // 主要职责：把外部歌词、封面和播放进度等实时数据送入程序内部。
 
 import (
-	"EbitenLyrics/evbus"
 	"bytes"
 	"context"
 	"encoding/binary"
@@ -21,6 +20,8 @@ import (
 	"sync/atomic"
 	"syscall"
 	"time"
+
+	"github.com/xiaowumin-mark/EbitenLyrics/evbus"
 
 	"github.com/disintegration/imaging"
 	"github.com/gorilla/websocket"

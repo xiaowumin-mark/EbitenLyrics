@@ -5,7 +5,7 @@ import (
 	"image/color"
 	"math"
 
-	"EbitenLyrics/filters"
+	"github.com/xiaowumin-mark/EbitenLyrics/filters"
 
 	"github.com/ebitenui/ebitenui/input"
 	"github.com/ebitenui/ebitenui/widget"

@@ -1,13 +1,14 @@
 package main
 
 import (
-	"EbitenLyrics/comps/liquidglass"
 	"bytes"
 	"fmt"
 	"image/color"
 	"log"
 	"math"
 	"time"
+
+	"github.com/xiaowumin-mark/EbitenLyrics/comps/liquidglass"
 
 	"github.com/ebitenui/ebitenui"
 	eimage "github.com/ebitenui/ebitenui/image"

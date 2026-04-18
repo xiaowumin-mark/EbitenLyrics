@@ -1,10 +1,11 @@
 package lyrics
 
 import (
-	"EbitenLyrics/anim"
-	ft "EbitenLyrics/font"
 	"testing"
 	"time"
+
+	"github.com/xiaowumin-mark/EbitenLyrics/anim"
+	ft "github.com/xiaowumin-mark/EbitenLyrics/font"
 )
 
 func TestLineStatusHelpers(t *testing.T) {
@@ -133,6 +134,49 @@ func TestEnsureScrollAnimationRetargetDoesNotReapplyDelay(t *testing.T) {
 
 	if got := line.GetPosition().GetY(); got <= firstY {
 		t.Fatalf("retargeted scroll reused delay and stalled, y = %v, previous = %v", got, firstY)
+	}
+}
+
+func TestUpdateFinalLayoutStateArmsWhenBackgroundStillVisible(t *testing.T) {
+	mainLine := NewLine(0, time.Second, false, false, "", nil, ft.FontRequest{}, 32)
+	bgLine := NewLine(0, time.Second, false, true, "", nil, ft.FontRequest{}, 24)
+	bgLine.isShow = true
+	bgLine.GetPosition().SetAlpha(1)
+	mainLine.BackgroundLines = []*Line{bgLine}
+
+	lyrics := &Lyrics{
+		Lines:     []*Line{mainLine},
+		nowLyrics: []int{},
+	}
+
+	changed := lineAnimationLayer.updateFinalLayoutState(lyrics, true, false)
+	if changed {
+		t.Fatal("changed should remain false while background line still occupies space")
+	}
+	if !lyrics.finalLayoutPending {
+		t.Fatal("final layout should stay pending until background line exits")
+	}
+}
+
+func TestUpdateFinalLayoutStateTriggersOnceBackgroundGone(t *testing.T) {
+	mainLine := NewLine(0, time.Second, false, false, "", nil, ft.FontRequest{}, 32)
+	bgLine := NewLine(0, time.Second, false, true, "", nil, ft.FontRequest{}, 24)
+	bgLine.isShow = true
+	bgLine.GetPosition().SetAlpha(0)
+	mainLine.BackgroundLines = []*Line{bgLine}
+
+	lyrics := &Lyrics{
+		Lines:              []*Line{mainLine},
+		nowLyrics:          []int{},
+		finalLayoutPending: true,
+	}
+
+	changed := lineAnimationLayer.updateFinalLayoutState(lyrics, true, false)
+	if !changed {
+		t.Fatal("changed should become true to force one final relayout")
+	}
+	if lyrics.finalLayoutPending {
+		t.Fatal("final layout pending should be cleared after relayout trigger")
 	}
 }
 

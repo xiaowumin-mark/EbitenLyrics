@@ -1,12 +1,13 @@
 package lyrics
 
 import (
-	ft "EbitenLyrics/font"
-	"EbitenLyrics/lp"
 	"image/color"
 	"math"
 	"reflect"
 	"sync"
+
+	ft "github.com/xiaowumin-mark/EbitenLyrics/font"
+	"github.com/xiaowumin-mark/EbitenLyrics/lp"
 
 	"github.com/hajimehoshi/ebiten/v2"
 )

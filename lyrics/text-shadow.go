@@ -4,10 +4,11 @@ package lyrics
 // 主要职责：缓存阴影位图并按位置参数绘制到屏幕。
 
 import (
-	"EbitenLyrics/filters"
-	ft "EbitenLyrics/font"
-	"EbitenLyrics/lp"
 	"image/color"
+
+	"github.com/xiaowumin-mark/EbitenLyrics/filters"
+	ft "github.com/xiaowumin-mark/EbitenLyrics/font"
+	"github.com/xiaowumin-mark/EbitenLyrics/lp"
 
 	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/hajimehoshi/ebiten/v2/text/v2"

@@ -1,14 +1,16 @@
 package lyrics
 
 import (
-	ft "EbitenLyrics/font"
-	"EbitenLyrics/ttml"
 	"errors"
 	"image/color"
 	"strings"
 	"time"
 	"unicode"
 	"unicode/utf8"
+
+	ft "github.com/xiaowumin-mark/EbitenLyrics/font"
+
+	ttml "github.com/xiaowumin-mark/EbitenLyrics/ttml"
 )
 
 const (
@@ -260,9 +262,10 @@ func New(ttmllines []ttml.LyricLine, screenW float64, fontManager *ft.FontManage
 	lyrics.anchorIndex = -1
 	lyrics.RenderMode = detectRenderMode(ttmllines)
 	for _, line := range ttmllines {
+		lineEnd := time.Duration(maxLineEndWithBackground(line)) * time.Millisecond
 		l := NewLine(
 			time.Duration(line.StartTime)*time.Millisecond,
-			time.Duration(line.EndTime)*time.Millisecond,
+			lineEnd,
 			line.IsDuet,
 			line.IsBG,
 			line.TranslatedLyric,
@@ -309,6 +312,16 @@ func New(ttmllines []ttml.LyricLine, screenW float64, fontManager *ft.FontManage
 		lyrics.Lines = append(lyrics.Lines, l)
 	}
 	return &lyrics, nil
+}
+
+func maxLineEndWithBackground(line ttml.LyricLine) int {
+	maxEnd := line.EndTime
+	for _, bgLine := range line.BGs {
+		if bgLine.EndTime > maxEnd {
+			maxEnd = bgLine.EndTime
+		}
+	}
+	return maxEnd
 }
 
 func CreateSyllable(ts []ttml.LyricWord, line *Line, fd float64) error {

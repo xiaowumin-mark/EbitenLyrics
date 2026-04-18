@@ -1,15 +1,16 @@
 package pages
 
 import (
-	"EbitenLyrics/comps/liquidglass"
-	"EbitenLyrics/debugpanel"
-	"EbitenLyrics/router"
 	"fmt"
 	"image"
 	"log"
 	"os"
 	"strings"
 	"time"
+
+	"github.com/xiaowumin-mark/EbitenLyrics/comps/liquidglass"
+	"github.com/xiaowumin-mark/EbitenLyrics/debugpanel"
+	"github.com/xiaowumin-mark/EbitenLyrics/router"
 
 	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/hajimehoshi/ebiten/v2/ebitenutil"

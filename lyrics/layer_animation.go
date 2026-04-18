@@ -4,14 +4,15 @@ package lyrics
 // 主要职责：处理滚动、聚焦、高亮和逐字动画的调度。
 
 import (
-	"EbitenLyrics/anim"
-	"EbitenLyrics/lp"
 	"log"
 	"math"
 	"sort"
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	"github.com/xiaowumin-mark/EbitenLyrics/anim"
+	"github.com/xiaowumin-mark/EbitenLyrics/lp"
 
 	"github.com/google/uuid"
 	"github.com/hajimehoshi/ebiten/v2"
@@ -336,6 +337,9 @@ func (AnimationLayer) scrollLyricsTo(l *Lyrics, activeIndexes []int, anchorIndex
 		offsetY += l.Lines[i].Position.GetH()
 		if _, ok := activeSet[i]; ok && len(l.Lines[i].BackgroundLines) > 0 {
 			for _, bgLine := range l.Lines[i].BackgroundLines {
+				if !backgroundLineReservesSpace(bgLine) {
+					continue
+				}
 				offsetY += bgLine.Position.GetH()
 			}
 		}
@@ -431,6 +435,9 @@ func (AnimationLayer) scrollLyricsTo(l *Lyrics, activeIndexes []int, anchorIndex
 		lastY += line.Position.GetH() + l.Margin
 		if isActive && len(line.BackgroundLines) > 0 {
 			for _, bgLine := range line.BackgroundLines {
+				if !backgroundLineReservesSpace(bgLine) {
+					continue
+				}
 				lastY += bgLine.Position.GetH() + l.Margin
 			}
 		}
@@ -490,6 +497,7 @@ func (AnimationLayer) UpdateLyrics(l *Lyrics, t time.Duration) {
 			changed = true
 			l.nowLyrics = append(l.nowLyrics, i)
 			l.nowLyrics = sortIntSlice(l.nowLyrics)
+			l.finalLayoutPending = false
 			log.Println("lyric enter", i, l.nowLyrics, line.Text)
 
 			lineAnimationLayer.cancelLineStatusSettle(line, l.AnimateManager)
@@ -499,10 +507,16 @@ func (AnimationLayer) UpdateLyrics(l *Lyrics, t time.Duration) {
 			if hasInt(l.nowLyrics, i) {
 				changed = true
 				l.nowLyrics = removeInt(l.nowLyrics, i)
-				log.Println("lyric leave", i)
+				log.Println("lyric leave", i, line.EndTime)
+				for _, bg := range line.BackgroundLines {
+					log.Println("bg line leave:", bg.EndTime)
+				}
 			}
 		}
 	}
+
+	allEnded := lyricsAllEndedAt(l.Lines, t)
+	changed = lineAnimationLayer.updateFinalLayoutState(l, allEnded, changed)
 
 	anchor := predictedScrollAnchorIndex(l.Lines, t)
 	if anchor >= 0 && (changed || anchor != l.anchorIndex) {
@@ -1236,6 +1250,58 @@ func lineVisibleAt(y, height, top, bottom float64) bool {
 	return maxY >= top && y <= bottom
 }
 
+func backgroundLineReservesSpace(line *Line) bool {
+	return line != nil && line.isShow && line.GetPosition().GetAlpha() > 0
+}
+
+func (AnimationLayer) updateFinalLayoutState(l *Lyrics, allEnded bool, changed bool) bool {
+	if l == nil {
+		return changed
+	}
+	terminalState := len(l.nowLyrics) == 0 && allEnded
+	if !terminalState {
+		l.finalLayoutPending = false
+		return changed
+	}
+
+	hasVisibleBackground := lyricsHasVisibleBackgroundLines(l.Lines)
+	if changed || hasVisibleBackground {
+		l.finalLayoutPending = true
+	}
+	if l.finalLayoutPending && !hasVisibleBackground {
+		changed = true
+		l.finalLayoutPending = false
+	}
+	return changed
+}
+
+func lyricsHasVisibleBackgroundLines(lines []*Line) bool {
+	for _, line := range lines {
+		if line == nil {
+			continue
+		}
+		for _, bg := range line.BackgroundLines {
+			if backgroundLineReservesSpace(bg) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func lyricsAllEndedAt(lines []*Line, t time.Duration) bool {
+	if len(lines) == 0 {
+		return false
+	}
+	maxEnd := time.Duration(0)
+	for _, line := range lines {
+		if line != nil && line.EndTime > maxEnd {
+			maxEnd = line.EndTime
+		}
+	}
+	return t >= maxEnd
+}
+
 func findScrollAnchorIndexByTime(lines []*Line, t time.Duration) int {
 	if len(lines) == 0 {
 		return -1
@@ -1279,8 +1345,9 @@ func shouldUseFastScroll(lyrics *Lyrics, currentIndex, targetIndex int) bool {
 
 func scrollDelayForIndex(anchorIndex, lineIndex int) time.Duration {
 	baseDelay := scrollLeadTime()
-	if lineIndex <= anchorIndex {
-		return baseDelay
-	}
+	// 这里不做处理
+	//if lineIndex <= anchorIndex {
+	//	return baseDelay
+	//}
 	return baseDelay + time.Duration(lineIndex-anchorIndex)*scrollDelayStep
 }

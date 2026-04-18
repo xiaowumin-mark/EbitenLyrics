@@ -4,10 +4,11 @@ package lyrics
 // 主要职责：维护字体、图像、时间轴和行级状态。
 
 import (
-	ft "EbitenLyrics/font"
-	"EbitenLyrics/lp"
 	"strings"
 	"time"
+
+	ft "github.com/xiaowumin-mark/EbitenLyrics/font"
+	"github.com/xiaowumin-mark/EbitenLyrics/lp"
 
 	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/hajimehoshi/ebiten/v2/text/v2"

@@ -1,10 +1,11 @@
 package lyrics
 
 import (
-	"EbitenLyrics/lp"
 	"math"
 	"strings"
 	"unicode"
+
+	"github.com/xiaowumin-mark/EbitenLyrics/lp"
 
 	"github.com/hajimehoshi/ebiten/v2/text/v2"
 )

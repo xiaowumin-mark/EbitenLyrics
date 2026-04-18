@@ -4,9 +4,10 @@ package lyrics
 // 主要职责：声明行、音节、元素、状态和整体歌词对象的字段布局。
 
 import (
-	"EbitenLyrics/anim"
-	ft "EbitenLyrics/font"
 	"time"
+
+	"github.com/xiaowumin-mark/EbitenLyrics/anim"
+	ft "github.com/xiaowumin-mark/EbitenLyrics/font"
 
 	"github.com/hajimehoshi/ebiten/v2"
 )
@@ -155,9 +156,10 @@ type Lyrics struct {
 
 	Position time.Duration
 
-	nowLyrics   []int
-	renderIndex []int
-	anchorIndex int
+	nowLyrics          []int
+	renderIndex        []int
+	anchorIndex        int
+	finalLayoutPending bool
 
 	Margin        float64
 	HighlightTime time.Duration

@@ -4,8 +4,9 @@ package lyrics
 // 主要职责：统一描述平移、缩放、旋转、透明度和包围盒计算。
 
 import (
-	"EbitenLyrics/lp"
 	"math"
+
+	"github.com/xiaowumin-mark/EbitenLyrics/lp"
 
 	"github.com/hajimehoshi/ebiten/v2"
 )

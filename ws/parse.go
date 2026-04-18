@@ -4,7 +4,7 @@ package ws
 // 主要职责：校验字段并组装 `ttml.LyricLine` 结果。
 
 import (
-	"EbitenLyrics/ttml"
+	"github.com/xiaowumin-mark/EbitenLyrics/ttml"
 
 	"github.com/go-viper/mapstructure/v2"
 )
