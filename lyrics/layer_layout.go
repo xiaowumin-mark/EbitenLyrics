@@ -74,7 +74,9 @@ func (LayoutLayer) LayoutLine(l *Line) {
 		align = text.AlignEnd
 	}
 
-	maxWidth := w - l.Padding*2
+	paddingLeft := l.EffectivePaddingLeft()
+	paddingRight := l.EffectivePaddingRight()
+	maxWidth := w - paddingLeft - paddingRight
 	if maxWidth < 1 {
 		maxWidth = 1
 	}
@@ -92,7 +94,7 @@ func (LayoutLayer) LayoutLine(l *Line) {
 		}
 		syll := l.Syllables[syllableIndex]
 
-		pos.SetX(pos.GetX() + l.Padding)
+		pos.SetX(pos.GetX() + paddingLeft)
 		pos.SetY(pos.GetY() + l.Padding)
 		lastX := pos.GetX()
 		for _, element := range syll.Elements {
@@ -141,7 +143,9 @@ func (LayoutLayer) GenerateLineTranslateImage(l *Line) {
 		align = text.AlignEnd
 	}
 
-	maxWidth := l.GetPosition().GetW() - l.Padding*2
+	paddingLeft := l.EffectivePaddingLeft()
+	paddingRight := l.EffectivePaddingRight()
+	maxWidth := l.GetPosition().GetW() - paddingLeft - paddingRight
 	if maxWidth < 1 {
 		maxWidth = 1
 	}
@@ -228,10 +232,7 @@ func (LayoutLayer) ResizeLine(l *Line, width float64) {
 	if l == nil || width <= 0 {
 		return
 	}
-	l.GetPosition().SetW(width * 0.9)
-	if l.IsDuet {
-		l.GetPosition().SetX(width - l.GetPosition().GetW())
-	}
+	applyRefHorizontalLayout(l, width, l.HasDuetInSong)
 	lineLayoutLayer.GenerateLineTranslateImage(l)
 	lineLayoutLayer.LayoutLine(l)
 	if l.isShow {
@@ -246,6 +247,8 @@ func (LayoutLayer) ResizeLyrics(l *Lyrics, w float64) {
 	if l == nil {
 		return
 	}
+	l.Width = w
+	l.Bottom.Resize(w)
 	for _, line := range l.Lines {
 		lineLayoutLayer.ResizeLine(line, w)
 	}

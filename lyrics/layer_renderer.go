@@ -4,7 +4,10 @@ package lyrics
 // 主要职责：根据当前状态把歌词行与音节绘制到目标画面。
 
 import (
+	"math"
+
 	"github.com/hajimehoshi/ebiten/v2"
+	"github.com/xiaowumin-mark/EbitenLyrics/filters"
 	"github.com/xiaowumin-mark/EbitenLyrics/lp"
 )
 
@@ -41,6 +44,7 @@ func (RendererLayer) RecreateLineImage(l *Line) {
 		return
 	}
 	if l.Image != nil {
+		l.clearBlurCache()
 		l.Image.Deallocate()
 		l.Image = nil
 	}
@@ -67,7 +71,7 @@ func (RendererLayer) redrawLineImage(l *Line) {
 	if l.TranslateImage != nil {
 		op := &ebiten.DrawImageOptions{}
 		op.GeoM.Translate(
-			lp.LP(l.Padding),
+			lp.LP(l.EffectivePaddingLeft()),
 			lp.LP(l.GetPosition().GetH()-l.TranslateImageH-l.Padding),
 		)
 		l.Image.DrawImage(l.TranslateImage, op)
@@ -92,22 +96,67 @@ func (RendererLayer) DrawLine(l *Line, screen *ebiten.Image) {
 
 	if l.Status.RequiresRealtimeRender() || l.imageDirty {
 		lineRendererLayer.redrawLineImage(l)
+		l.clearBlurCache()
+	}
+	drawImage := l.Image
+	if l.BlurLevel > 0 {
+		drawImage = lineRendererLayer.blurredLineImage(l)
 	}
 
 	drawImageResample4x4(
 		screen,
-		l.Image,
+		drawImage,
 		TransformToGeoM(l.GetPosition()),
 		float32(l.GetPosition().GetAlpha()),
 		ebiten.BlendLighter,
 	)
 }
 
+func (RendererLayer) blurredLineImage(l *Line) *ebiten.Image {
+	if l == nil || l.Image == nil || l.BlurLevel <= 0 {
+		return l.Image
+	}
+	blurPixels := blurPixelsForLevel(l.BlurLevel)
+	cacheKey := blurCacheKey(blurPixels)
+	if cacheKey <= 0 {
+		return l.Image
+	}
+	if l.BlurImage != nil && l.BlurCacheSource == l.Image && l.BlurCacheKey == cacheKey {
+		return l.BlurImage
+	}
+	l.clearBlurCache()
+	l.BlurCacheSource = l.Image
+	l.BlurCacheKey = cacheKey
+	l.BlurImage = filters.BlurImageShader(l.Image, lp.LP(blurPixels))
+	return l.BlurImage
+}
+
+func blurPixelsForLevel(level float64) float64 {
+	if level <= 0 || math.IsNaN(level) || math.IsInf(level, 0) {
+		return 0
+	}
+	if level > 5 {
+		level = 5
+	}
+	return level
+}
+
+func blurCacheKey(blurPixels float64) int {
+	if blurPixels <= 0 || math.IsNaN(blurPixels) || math.IsInf(blurPixels, 0) {
+		return 0
+	}
+	if blurPixels > 5 {
+		blurPixels = 5
+	}
+	return int(math.Round(blurPixels * 1000))
+}
+
 func (l *Line) canUseStaticLayer() bool {
 	return l != nil &&
 		l.isShow &&
 		l.Status == LineStatusPreviewStatic &&
-		l.GetPosition().GetAlpha() > 0
+		l.GetPosition().GetAlpha() > 0 &&
+		l.BlurLevel <= 0
 }
 
 func (l *Line) shouldDrawDynamically() bool {
@@ -136,9 +185,11 @@ func (RendererLayer) DisposeLine(l *Line) {
 		l.TranslateImage = nil
 	}
 	if l.Image != nil {
+		l.clearBlurCache()
 		l.Image.Deallocate()
 		l.Image = nil
 	}
+	l.clearBlurCache()
 	l.isShow = false
 	l.imageDirty = true
 	l.setStatus(LineStatusHidden)
@@ -194,6 +245,10 @@ func (RendererLayer) DrawLyricsDynamic(l *Lyrics, screen *ebiten.Image) {
 	lineRendererLayer.drawLyricsFiltered(l, screen, func(line *Line) bool {
 		return line.shouldDrawDynamically()
 	})
+	if l != nil {
+		l.Dots.Draw(screen)
+		l.Bottom.Draw(screen)
+	}
 }
 
 func (RendererLayer) drawLyricsFiltered(l *Lyrics, screen *ebiten.Image, include func(*Line) bool) {

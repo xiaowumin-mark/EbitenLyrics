@@ -335,3 +335,14 @@ func TestStaticLayerClassification(t *testing.T) {
 		t.Fatal("active line should be drawn dynamically")
 	}
 }
+
+func TestBlurredLineDoesNotUseStaticLayer(t *testing.T) {
+	line := NewLine(0, time.Second, false, false, "", nil, ft.FontRequest{}, 32)
+	line.isShow = true
+	line.setStatus(LineStatusPreviewStatic)
+	line.GetPosition().SetAlpha(1)
+	line.BlurLevel = 1
+	if line.canUseStaticLayer() {
+		t.Fatal("blurred line should not use static layer")
+	}
+}

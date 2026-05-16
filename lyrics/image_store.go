@@ -18,6 +18,13 @@ type imageStore struct {
 	gradients map[gradientKey]*sharedImage
 }
 
+type ImageCacheStats struct {
+	TextMaskEntries int
+	TextMaskRefs    int
+	GradientEntries int
+	GradientRefs    int
+}
+
 type sharedImage struct {
 	img  *ebiten.Image
 	refs int
@@ -73,6 +80,30 @@ func (s *imageStore) purge() {
 		}
 		entry.img.Deallocate()
 	}
+}
+
+func (s *imageStore) stats() ImageCacheStats {
+	if s == nil {
+		return ImageCacheStats{}
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	stats := ImageCacheStats{
+		TextMaskEntries: len(s.textMasks),
+		GradientEntries: len(s.gradients),
+	}
+	for _, entry := range s.textMasks {
+		if entry != nil {
+			stats.TextMaskRefs += entry.refs
+		}
+	}
+	for _, entry := range s.gradients {
+		if entry != nil {
+			stats.GradientRefs += entry.refs
+		}
+	}
+	return stats
 }
 
 func normalizeFloatKey(v float64) float64 {
@@ -236,4 +267,8 @@ func releaseGradient(key gradientKey) {
 
 func PurgeSharedImageCache() {
 	sharedImageStore.purge()
+}
+
+func SharedImageCacheStats() ImageCacheStats {
+	return sharedImageStore.stats()
 }

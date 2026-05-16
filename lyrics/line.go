@@ -145,7 +145,29 @@ func (l *Line) GetTranslatedText() string {
 
 func (l *Line) SetPadding(padding float64) {
 	l.Padding = padding
+	l.PaddingLeft = padding
+	l.PaddingRight = padding
 	l.markImageDirty()
+}
+
+func (l *Line) SetHorizontalPadding(left, right float64) {
+	l.PaddingLeft = left
+	l.PaddingRight = right
+	l.markImageDirty()
+}
+
+func (l *Line) EffectivePaddingLeft() float64 {
+	if l.PaddingLeft != 0 || l.PaddingRight != 0 {
+		return l.PaddingLeft
+	}
+	return l.Padding
+}
+
+func (l *Line) EffectivePaddingRight() float64 {
+	if l.PaddingLeft != 0 || l.PaddingRight != 0 {
+		return l.PaddingRight
+	}
+	return l.Padding
 }
 
 func (l *Line) GetPadding() float64 {
@@ -225,6 +247,19 @@ func (l *Line) markImageDirty() {
 		return
 	}
 	l.imageDirty = true
+	l.clearBlurCache()
+}
+
+func (l *Line) clearBlurCache() {
+	if l == nil {
+		return
+	}
+	if l.BlurImage != nil {
+		l.BlurImage.Deallocate()
+		l.BlurImage = nil
+	}
+	l.BlurCacheSource = nil
+	l.BlurCacheKey = 0
 }
 
 func (l *Line) setStatus(status LineStatus) {

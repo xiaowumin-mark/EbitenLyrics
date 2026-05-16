@@ -258,9 +258,34 @@ func createLineModeSyllables(ts []ttml.LyricWord, line *Line, fd float64, alpha 
 
 func New(ttmllines []ttml.LyricLine, screenW float64, fontManager *ft.FontManager, req ft.FontRequest, fs, fd float64) (*Lyrics, error) {
 	var lyrics Lyrics
+	ttmllines = optimizeLyricLines(ttmllines)
 	lyrics.FD = fd
+	lyrics.Width = screenW
+	lyrics.FontManager = fontManager
+	lyrics.FontRequest = req.Normalized()
 	lyrics.anchorIndex = -1
+	lyrics.Timeline = newTimelineState()
+	lyrics.Layout = newLayoutState()
+	lyrics.Dots = newInterludeDots(fs)
+	lyrics.Bottom = newBottomLine(fs, screenW)
+	lyrics.Bottom.SetFont(fontManager, lyrics.FontRequest, fs)
 	lyrics.RenderMode = detectRenderMode(ttmllines)
+	hasDuetLine := false
+	for _, line := range ttmllines {
+		if line.IsDuet {
+			hasDuetLine = true
+			break
+		}
+		for _, bg := range line.BGs {
+			if bg.IsDuet {
+				hasDuetLine = true
+				break
+			}
+		}
+		if hasDuetLine {
+			break
+		}
+	}
 	for _, line := range ttmllines {
 		lineEnd := time.Duration(maxLineEndWithBackground(line)) * time.Millisecond
 		l := NewLine(
@@ -274,11 +299,7 @@ func New(ttmllines []ttml.LyricLine, screenW float64, fontManager *ft.FontManage
 			fs,
 		)
 		l.RenderMode = lyrics.RenderMode
-		l.Position.SetW(screenW * 0.9)
-		l.SetPadding(20)
-		if line.IsDuet {
-			l.Position.SetX(screenW - l.Position.GetW())
-		}
+		applyRefHorizontalLayout(l, screenW, hasDuetLine)
 		if err := CreateSyllable(line.Words, l, fd); err != nil {
 			return nil, err
 		}
@@ -296,11 +317,7 @@ func New(ttmllines []ttml.LyricLine, screenW float64, fontManager *ft.FontManage
 				fs/1.5,
 			)
 			lbg.RenderMode = lyrics.RenderMode
-			lbg.Position.SetW(screenW * 0.9)
-			lbg.SetPadding(20)
-			if bgline.IsDuet {
-				lbg.Position.SetX(screenW - lbg.Position.GetW())
-			}
+			applyRefHorizontalLayout(lbg, screenW, hasDuetLine)
 			if err := CreateSyllable(bgline.Words, lbg, fd); err != nil {
 				return nil, err
 			}

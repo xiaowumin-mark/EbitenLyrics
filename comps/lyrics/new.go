@@ -39,6 +39,7 @@ type LyricsComponent struct {
 	switchFadeStart      time.Time
 	switchFadeDuration   time.Duration
 	switchFadeActive     bool
+	lastTick             time.Time
 }
 
 func NewLyricsComponent(anim *anim.Manager, fontManager *ft.FontManager, req ft.FontRequest, w, h, fs, fd float64) *LyricsComponent {
@@ -307,6 +308,119 @@ func (l *LyricsComponent) Update(t time.Duration) {
 	l.LyricsControl.Update(l.LyricsControl.Position)
 }
 
+func (l *LyricsComponent) Tick(dt time.Duration) {
+	if l.LyricsControl == nil {
+		return
+	}
+	l.LyricsControl.Tick(dt)
+}
+
+func (l *LyricsComponent) TickNow(now time.Time) {
+	if l.lastTick.IsZero() {
+		l.lastTick = now
+		return
+	}
+	dt := now.Sub(l.lastTick)
+	l.lastTick = now
+	l.Tick(dt)
+}
+
+func (l *LyricsComponent) SetUserScrolling(scrolling bool) {
+	if l.LyricsControl == nil {
+		return
+	}
+	l.LyricsControl.SetUserScrolling(scrolling)
+}
+
+func (l *LyricsComponent) SetScrollOffset(offset float64) {
+	if l.LyricsControl == nil {
+		return
+	}
+	l.LyricsControl.SetScrollOffset(offset)
+}
+
+func (l *LyricsComponent) AddScrollOffset(delta float64) {
+	if l.LyricsControl == nil {
+		return
+	}
+	l.LyricsControl.AddScrollOffset(delta)
+}
+
+func (l *LyricsComponent) AddWheelScroll(delta float64) {
+	if l.LyricsControl == nil {
+		return
+	}
+	l.LyricsControl.AddWheelScroll(delta)
+}
+
+func (l *LyricsComponent) ResetScrollOffset() {
+	if l.LyricsControl == nil {
+		return
+	}
+	l.LyricsControl.ResetScrollOffset()
+}
+
+func (l *LyricsComponent) ResetScroll() {
+	l.ResetScrollOffset()
+}
+
+func (l *LyricsComponent) SetHidePassedLines(enabled bool) {
+	if l.LyricsControl == nil {
+		return
+	}
+	l.LyricsControl.SetHidePassedLines(enabled)
+}
+
+func (l *LyricsComponent) SetEnableBlur(enabled bool) {
+	if l.LyricsControl == nil {
+		return
+	}
+	l.LyricsControl.SetEnableBlur(enabled)
+}
+
+func (l *LyricsComponent) SetBlurStrength(strength float64) {
+	if l.LyricsControl == nil {
+		return
+	}
+	l.LyricsControl.SetBlurStrength(strength)
+}
+
+func (l *LyricsComponent) SetBottomLineText(text string) {
+	if l.LyricsControl == nil {
+		return
+	}
+	l.LyricsControl.SetBottomLineText(text)
+}
+
+func (l *LyricsComponent) ClearBottomLine() {
+	if l.LyricsControl == nil {
+		return
+	}
+	l.LyricsControl.ClearBottomLine()
+}
+
+func (l *LyricsComponent) Pause() {
+	if l.LyricsControl == nil {
+		return
+	}
+	l.LyricsControl.Pause()
+}
+
+func (l *LyricsComponent) Resume() {
+	if l.LyricsControl == nil {
+		return
+	}
+	l.LyricsControl.Resume()
+}
+
+func (l *LyricsComponent) SetPlaying(playing bool) {
+	if playing {
+		l.Resume()
+		return
+	}
+	l.Pause()
+}
+
 func (l *LyricsComponent) Resize(w, h float64) {
 	if w <= 0 || h <= 0 {
 		return
@@ -328,6 +442,7 @@ func (l *LyricsComponent) SetFontSize(fs float64) *LyricsComponent {
 	for _, line := range l.LyricsControl.Lines {
 		line.SetFontSize(fs)
 	}
+	l.LyricsControl.Bottom.SetFont(l.FontManager, l.FontRequest, fs)
 	currentPosition := l.LyricsControl.Position
 	l.LyricsControl.Update(currentPosition)
 	l.LyricsControl.Scroll(l.LyricsControl.GetNowLyrics(), 0)
@@ -342,6 +457,9 @@ func (l *LyricsComponent) SetFont(fontManager *ft.FontManager, req ft.FontReques
 	}
 	l.FontManager = fontManager
 	l.FontRequest = req.Normalized()
+	l.LyricsControl.FontManager = fontManager
+	l.LyricsControl.FontRequest = l.FontRequest
+	l.LyricsControl.Bottom.SetFont(fontManager, l.FontRequest, l.FontSize)
 	for _, line := range l.LyricsControl.Lines {
 		line.SetFont(fontManager, l.FontRequest)
 	}

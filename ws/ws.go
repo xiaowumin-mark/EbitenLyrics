@@ -605,6 +605,7 @@ func Initws() {
 				case "setMusic":
 					log.Println(p.Data)
 					evbus.Bus.Publish("ws:setMusic", p.Data)
+
 				case "setLyric":
 					//log.Println(p.Data)
 					/*d, err := ParseLyricsFromMap(p.Data["lines"].([]interface{}))
@@ -669,6 +670,8 @@ func Initws() {
 					evbus.Bus.Publish("ws:progress", progress)
 				case "volume":
 					log.Println(p.Data)
+				case "play", "resume", "pause", "paused", "playing", "playState", "playerState", "setPlayState", "setPlaying":
+					evbus.Bus.Publish("ws:playState", p.Data)
 				case "setCover":
 					log.Println(p.Data)
 				case "setFontConfig", "setFont":

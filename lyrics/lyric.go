@@ -66,3 +66,52 @@ func (l *Lyrics) StaticLayerSignature() (uint64, bool, bool) {
 	}
 	return signature, true, needsRebuild
 }
+
+type RenderCacheStats struct {
+	VisibleLines          int
+	LineImages            int
+	DirtyLineImages       int
+	LineBlurImages        int
+	BottomImage           bool
+	BottomImageDirty      bool
+	BottomBlurImage       bool
+	SharedImageCacheStats ImageCacheStats
+}
+
+func (l *Lyrics) RenderCacheStats() RenderCacheStats {
+	stats := RenderCacheStats{SharedImageCacheStats: SharedImageCacheStats()}
+	if l == nil {
+		return stats
+	}
+
+	accumulate := func(line *Line) {
+		if line == nil || !line.isShow {
+			return
+		}
+		stats.VisibleLines++
+		if line.Image != nil {
+			stats.LineImages++
+		}
+		if line.imageDirty {
+			stats.DirtyLineImages++
+		}
+		if line.BlurImage != nil {
+			stats.LineBlurImages++
+		}
+	}
+
+	for _, line := range l.Lines {
+		accumulate(line)
+		if line == nil {
+			continue
+		}
+		for _, bgLine := range line.BackgroundLines {
+			accumulate(bgLine)
+		}
+	}
+
+	stats.BottomImage = l.Bottom.Image != nil
+	stats.BottomImageDirty = l.Bottom.ImageDirty
+	stats.BottomBlurImage = l.Bottom.BlurImage != nil
+	return stats
+}

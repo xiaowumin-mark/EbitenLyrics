@@ -4,7 +4,6 @@ package lyrics
 // 主要职责：处理滚动、聚焦、高亮和逐字动画的调度。
 
 import (
-	"log"
 	"math"
 	"sort"
 	"strings"
@@ -18,15 +17,11 @@ import (
 	"github.com/hajimehoshi/ebiten/v2"
 )
 
-var CustomElastic = anim.NewEaseInElastic(1.03, 1.7)
-
 const (
 	// maxHighlightWordRunes 限制单次高亮动画的最大字符数，避免超长词元造成夸张抖动。
 	maxHighlightWordRunes = 8
 
 	scrollFastGapThreshold = 450 * time.Millisecond
-	scrollDurationNormal   = 900 * time.Millisecond
-	scrollDurationFast     = 600 * time.Millisecond
 	scrollDelayStep        = 50 * time.Millisecond
 	scrollDelayIndexOffset = 3
 
@@ -41,14 +36,19 @@ const (
 	animationValueEpsilon    = 0.01
 )
 
-var scrollEaseFast = anim.EaseOutQuart
-
 func (l *Lyrics) Scroll(index []int, notInit int) {
 	lineAnimationLayer.ScrollLyrics(l, index, notInit)
 }
 
 func (l *Lyrics) Update(t time.Duration) {
 	lineAnimationLayer.UpdateLyrics(l, t)
+}
+
+func (l *Lyrics) Tick(dt time.Duration) {
+	if dt <= 0 || dt > 250*time.Millisecond {
+		dt = time.Second / 60
+	}
+	updateLyricsSprings(l, dt)
 }
 
 func (l *Line) ToNormal(lyrics *Lyrics) {
@@ -290,8 +290,8 @@ func (AnimationLayer) scrollLyricsTo(l *Lyrics, activeIndexes []int, anchorIndex
 	if l == nil || len(l.Lines) == 0 {
 		return
 	}
-
-	prevAnchorIndex := l.anchorIndex
+	ensureTimelineState(l)
+	ensureLayoutState(l)
 
 	if anchorIndex < 0 {
 		if len(activeIndexes) > 0 {
@@ -307,16 +307,23 @@ func (AnimationLayer) scrollLyricsTo(l *Lyrics, activeIndexes []int, anchorIndex
 	if anchorIndex < 0 {
 		anchorIndex = 0
 	}
-	if anchorIndex >= len(l.Lines) {
-		anchorIndex = len(l.Lines) - 1
+	bottomIndex := len(l.Lines)
+	if anchorIndex > bottomIndex {
+		anchorIndex = bottomIndex
 	}
 	l.anchorIndex = anchorIndex
-
-	scrollDuration := scrollDurationNormal
-	scrollEase := anim.EaseFunc(CustomElastic)
-	if shouldUseFastScroll(l, prevAnchorIndex, anchorIndex) {
-		scrollDuration = scrollDurationFast
-		scrollEase = scrollEaseFast
+	if l.Timeline.ScrollToIndex != anchorIndex {
+		l.Timeline.ScrollToIndex = anchorIndex
+	}
+	interlude := computeCurrentInterlude(l)
+	isInterludeActive := interlude != nil
+	interludeCurrentTime := l.Timeline.CurrentTime + interludeTimeOffset
+	if l.Layout.TargetAlignIndex != anchorIndex || l.Layout.LastInterludeState != isInterludeActive {
+		l.Layout.LastInterludeState = isInterludeActive
+		updateLinePosYSpringParams(l, computeLinePosYSpringParams(l, anchorIndex, isInterludeActive))
+	}
+	if !isInterludeActive {
+		l.Dots.SetInterlude(nil)
 	}
 
 	activeSet := make(map[int]struct{}, len(activeIndexes)+1)
@@ -327,7 +334,9 @@ func (AnimationLayer) scrollLyricsTo(l *Lyrics, activeIndexes []int, anchorIndex
 		activeSet[i] = struct{}{}
 	}
 	if len(activeSet) == 0 {
-		activeSet[anchorIndex] = struct{}{}
+		if anchorIndex < len(l.Lines) {
+			activeSet[anchorIndex] = struct{}{}
+		}
 	}
 
 	for i, el := range l.Lines {
@@ -341,32 +350,81 @@ func (AnimationLayer) scrollLyricsTo(l *Lyrics, activeIndexes []int, anchorIndex
 
 	_, h := ebiten.WindowSize()
 	viewportHeight := lp.FromLP(float64(h))
-	offsetY := -viewportHeight / 4
-	for i := 0; i < anchorIndex; i++ {
-		offsetY += l.Lines[i].Position.GetH()
-		for _, bgLine := range l.Lines[i].BackgroundLines {
-			if !backgroundLineReservesSpace(bgLine) {
-				continue
-			}
-			offsetY += bgLine.Position.GetH()
-		}
-	}
-
+	l.Dots.UpdateMetrics(l.DotsFontSize(), viewportHeight)
 	overscan := math.Max(120, viewportHeight*0.45)
+	l.Layout.OverscanPx = overscan
 	viewportTop := -overscan
 	viewportBottom := viewportHeight + overscan
 	isInitialPlacement := notInit == 0
 	cullTransitionDistance := overscan * 1.35
 	snapDistance := math.Max(viewportHeight*0.9, 320)
+	force := isInitialPlacement || l.Timeline.IsSeeking
+	interludeHeight := 0.0
+	if isInterludeActive {
+		interludeHeight = l.Dots.TotalHeight()
+	}
 
-	lastY := 0.0
+	lineHeightFallback := viewportHeight / 5
+	scrollOffset := 0.0
+	for i := 0; i < anchorIndex; i++ {
+		line := l.Lines[i]
+		if line == nil {
+			scrollOffset += lineHeightFallback
+			continue
+		}
+		scrollOffset += safeLineHeight(line, lineHeightFallback)
+		presentation := computeMainLinePresentation(l, line, i)
+		for _, bg := range line.BackgroundLines {
+			bgPresentation := computeBackgroundLinePresentation(l, bg, presentation)
+			if bgPresentation.ReserveSpace {
+				scrollOffset += safeLineHeight(bg, lineHeightFallback)
+			}
+		}
+	}
+	lineAnimationLayer.updateScrollMinBoundary(l, scrollOffset)
+
+	targetLineHeight := lineHeightFallback
+	if anchorIndex >= 0 && anchorIndex < len(l.Lines) {
+		targetLineHeight = safeLineHeight(l.Lines[anchorIndex], lineHeightFallback)
+	} else if anchorIndex == bottomIndex {
+		targetLineHeight = l.Bottom.LineSize[1]
+	}
+	curPos := -scrollOffset - l.Layout.ScrollOffset + viewportHeight*l.Layout.AlignPosition
+	if isInterludeActive && interlude.AnchorLineIndex != -1 {
+		curPos -= interludeHeight
+	}
+	switch l.Layout.AlignAnchor {
+	case LayoutAlignAnchorBottom:
+		curPos -= targetLineHeight
+	case LayoutAlignAnchorCenter:
+		curPos -= targetLineHeight / 2
+	}
+	l.Layout.TargetAlignIndex = anchorIndex
+
+	delay := time.Duration(0)
+	baseDelay := 50 * time.Millisecond
+	if isInitialPlacement {
+		baseDelay = 0
+	}
+	setDots := false
+
 	renderSet := make(map[int]struct{}, len(l.Lines)/2+1)
 	for i, line := range l.Lines {
-		targetLineY := lastY - offsetY
+		if isInterludeActive && !setDots && i == interlude.AnchorLineIndex+1 {
+			setDots = true
+			curPos += l.Dots.Margin
+			dotX := interludeDotsXForLine(l, line, interlude.IsNextDuet)
+			l.Dots.SetLayout(true, dotX, curPos)
+			l.Dots.SetInterludeAt(interlude, interludeCurrentTime)
+			curPos += l.Dots.Height() + l.Dots.Margin
+		}
+		presentation := computeMainLinePresentation(l, line, i)
+		applyLinePresentation(line, presentation)
+		targetLineY := curPos
 		_, isActive := activeSet[i]
 		isAnchor := i == anchorIndex
 		currentLineY := line.GetPosition().GetY()
-		if isInitialPlacement {
+		if force {
 			currentLineY = targetLineY
 		}
 		lineHeight := line.GetPosition().GetH()
@@ -380,6 +438,8 @@ func (AnimationLayer) scrollLyricsTo(l *Lyrics, activeIndexes []int, anchorIndex
 			if bg == nil {
 				continue
 			}
+			bgPresentation := computeBackgroundLinePresentation(l, bg, presentation)
+			applyLinePresentation(bg, bgPresentation)
 			currentBgY := bg.GetPosition().GetY()
 			if isInitialPlacement {
 				currentBgY = bgTargetY
@@ -392,7 +452,7 @@ func (AnimationLayer) scrollLyricsTo(l *Lyrics, activeIndexes []int, anchorIndex
 			if bgShouldRender {
 				shouldRender = true
 			}
-			if backgroundLineReservesSpace(bg) {
+			if bgPresentation.ReserveSpace {
 				bgTargetY += bgHeight + l.Margin
 			}
 		}
@@ -405,18 +465,25 @@ func (AnimationLayer) scrollLyricsTo(l *Lyrics, activeIndexes []int, anchorIndex
 		}
 
 		lineTravel := math.Abs(targetLineY - line.GetPosition().GetY())
-		if isInitialPlacement || !shouldRender || lineTravel > snapDistance {
+		lineDelay := delay
+		if force {
+			lineDelay = 0
+		}
+		if force || !shouldRender || lineTravel > snapDistance {
 			if line.ScrollAnimate != nil {
 				cancelManagedAnimation(l.AnimateManager, line.ScrollAnimate)
 				line.ScrollAnimate = nil
 			}
-			line.GetPosition().SetY(targetLineY)
+			setLineSpringTargets(line, targetLineY, presentation.TargetScale, true)
 			if !line.Status.RequiresRealtimeRender() {
 				lineAnimationLayer.syncPreviewState(line)
 			}
 		} else {
-			delay := scrollDelayForIndex(anchorIndex, i)
-			lineAnimationLayer.ensureScrollAnimation(line, l, targetLineY, delay, scrollDuration, scrollEase)
+			if line.ScrollAnimate != nil {
+				cancelManagedAnimation(l.AnimateManager, line.ScrollAnimate)
+				line.ScrollAnimate = nil
+			}
+			setLineSpringTargets(line, targetLineY, presentation.TargetScale, false, lineDelay)
 			if !line.Status.RequiresRealtimeRender() {
 				line.setStatus(LineStatusPreviewScrolling)
 			}
@@ -427,14 +494,14 @@ func (AnimationLayer) scrollLyricsTo(l *Lyrics, activeIndexes []int, anchorIndex
 			if bg == nil {
 				continue
 			}
-			bgReservesSpace := backgroundLineReservesSpace(bg)
+			bgReservesSpace := bg.Presentation.ReserveSpace
 			bgTravel := math.Abs(bgTargetY - bg.GetPosition().GetY())
-			if isInitialPlacement || !shouldRender || bgTravel > snapDistance {
+			if force || !shouldRender || bgTravel > snapDistance {
 				if bg.ScrollAnimate != nil {
 					cancelManagedAnimation(l.AnimateManager, bg.ScrollAnimate)
 					bg.ScrollAnimate = nil
 				}
-				bg.GetPosition().SetY(bgTargetY)
+				setLineSpringTargets(bg, bgTargetY, bg.Presentation.TargetScale, true)
 				if !bg.Status.RequiresRealtimeRender() {
 					lineAnimationLayer.syncPreviewState(bg)
 				}
@@ -443,8 +510,11 @@ func (AnimationLayer) scrollLyricsTo(l *Lyrics, activeIndexes []int, anchorIndex
 				}
 				continue
 			}
-			delay := scrollDelayForIndex(anchorIndex, i)
-			lineAnimationLayer.ensureScrollAnimation(bg, l, bgTargetY, delay, scrollDuration, scrollEase)
+			if bg.ScrollAnimate != nil {
+				cancelManagedAnimation(l.AnimateManager, bg.ScrollAnimate)
+				bg.ScrollAnimate = nil
+			}
+			setLineSpringTargets(bg, bgTargetY, bg.Presentation.TargetScale, false, lineDelay)
 			if !bg.Status.RequiresRealtimeRender() {
 				bg.setStatus(LineStatusPreviewScrolling)
 			}
@@ -453,14 +523,45 @@ func (AnimationLayer) scrollLyricsTo(l *Lyrics, activeIndexes []int, anchorIndex
 			}
 		}
 
-		lastY += line.Position.GetH() + l.Margin
+		curPos += safeLineHeight(line, lineHeightFallback) + l.Margin
 		for _, bgLine := range line.BackgroundLines {
-			if !backgroundLineReservesSpace(bgLine) {
+			if !bgLine.Presentation.ReserveSpace {
 				continue
 			}
-			lastY += bgLine.Position.GetH() + l.Margin
+			curPos += safeLineHeight(bgLine, lineHeightFallback) + l.Margin
+		}
+		if curPos >= 0 && !l.Timeline.IsSeeking {
+			if !line.IsBackground {
+				delay += baseDelay
+			}
+			if i >= l.Timeline.ScrollToIndex && baseDelay > 0 {
+				baseDelay = time.Duration(float64(baseDelay) / 1.05)
+			}
 		}
 	}
+	isBottomFocused := anchorIndex == bottomIndex
+	l.Bottom.SetFocused(isBottomFocused)
+	bottomBlur := computeLineBlur(computeLineBlurInput{
+		EnableBlur:      l.Layout.EnableBlur,
+		IsUserScrolling: l.Layout.IsUserScrolling,
+		IsActive:        isBottomFocused,
+		ItemIndex:       bottomIndex,
+		ScrollToIndex:   l.Timeline.ScrollToIndex,
+		LatestIndex:     latestBufferedIndex(l.Timeline.BufferedLines),
+		IsCompact:       false,
+	})
+	bottomDelay := delay
+	if force {
+		bottomDelay = 0
+	}
+	l.Bottom.SetTransform(0, curPos, bottomBlur, force, bottomDelay)
+	curPos += l.Bottom.LineSize[1]
+	if isInterludeActive && !setDots && interlude.AnchorLineIndex == len(l.Lines)-1 {
+		curPos += l.Dots.Margin
+		l.Dots.SetLayout(true, 0, curPos)
+		l.Dots.SetInterludeAt(interlude, interludeCurrentTime)
+	}
+	lineAnimationLayer.updateScrollMaxBoundary(l, curPos, viewportHeight)
 
 	renderIndex := make([]int, 0, len(renderSet))
 	for i := range renderSet {
@@ -487,13 +588,62 @@ func (AnimationLayer) scrollLyricsTo(l *Lyrics, activeIndexes []int, anchorIndex
 	}
 }
 
+func safeLineHeight(line *Line, fallback float64) float64 {
+	if line == nil {
+		return fallback
+	}
+	if h := line.Position.GetH(); h > 0 {
+		return h
+	}
+	return fallback
+}
+
+func (AnimationLayer) updateScrollMinBoundary(l *Lyrics, targetOffset float64) {
+	if l == nil {
+		return
+	}
+	l.Layout.ScrollMinOffset = -targetOffset
+}
+
+func (AnimationLayer) updateScrollMaxBoundary(l *Lyrics, contentEndY, viewportHeight float64) {
+	if l == nil {
+		return
+	}
+	l.Layout.ScrollMaxOffset = contentEndY + l.Layout.ScrollOffset - viewportHeight/2
+	if l.Layout.ScrollMaxOffset < l.Layout.ScrollMinOffset {
+		l.Layout.ScrollMaxOffset = l.Layout.ScrollMinOffset
+	}
+}
+
 func (AnimationLayer) UpdateLyrics(l *Lyrics, t time.Duration) {
 	if l == nil {
 		return
 	}
+	ensureTimelineState(l)
 	l.Position = t
-	changed := false
-	for i, line := range l.Lines {
+	stateResult := computePlayerTimeState(l, t)
+	commitResult := commitPlayerTimeState(l, t, stateResult)
+	changed := commitResult.shouldLayout
+	for _, i := range commitResult.linesToDisable {
+		if i < 0 || i >= len(l.Lines) || l.Lines[i] == nil {
+			continue
+		}
+		lineAnimationLayer.NormalizeLine(l.Lines[i], l)
+		for _, bg := range l.Lines[i].BackgroundLines {
+			lineAnimationLayer.NormalizeLine(bg, l)
+		}
+	}
+	for _, i := range commitResult.linesToEnable {
+		if i < 0 || i >= len(l.Lines) || l.Lines[i] == nil {
+			continue
+		}
+		line := l.Lines[i]
+		lineAnimationLayer.cancelLineStatusSettle(line, l.AnimateManager)
+		line.setStatus(LineStatusActiveEnter)
+		lineAnimationLayer.LineAnimate(line, l, l.FD)
+	}
+	syncNowLyricsFromTimeline(l)
+	for _, line := range l.Lines {
 		if t >= line.StartTime && t < line.EndTime {
 			// 逐行模式不需要逐字扫光偏移，避免出现“进度条式”高亮。
 			if line.RenderMode != RenderModeLine && useRealtimeOffsetFormula {
@@ -502,36 +652,20 @@ func (AnimationLayer) UpdateLyrics(l *Lyrics, t time.Duration) {
 					applyRealtimeOffsets(bgLine.OuterSyllableElements, t, l.FD)
 				}
 			}
-			if hasInt(l.nowLyrics, i) {
-				continue
-			}
-			changed = true
-			l.nowLyrics = append(l.nowLyrics, i)
-			l.nowLyrics = sortIntSlice(l.nowLyrics)
-			l.finalLayoutPending = false
-			log.Println("lyric enter", i, l.nowLyrics, line.Text)
-
-			lineAnimationLayer.cancelLineStatusSettle(line, l.AnimateManager)
-			line.setStatus(LineStatusActiveEnter)
-			lineAnimationLayer.LineAnimate(line, l, l.FD)
-		} else {
-			if hasInt(l.nowLyrics, i) {
-				changed = true
-				l.nowLyrics = removeInt(l.nowLyrics, i)
-				log.Println("lyric leave", i, line.EndTime)
-				for _, bg := range line.BackgroundLines {
-					log.Println("bg line leave:", bg.EndTime)
-				}
-			}
 		}
 	}
 
 	allEnded := lyricsAllEndedAt(l.Lines, t)
 	changed = lineAnimationLayer.updateFinalLayoutState(l, allEnded, changed)
 
-	anchor := predictedScrollAnchorIndex(l.Lines, t)
-	if anchor >= 0 && (changed || anchor != l.anchorIndex) {
-		lineAnimationLayer.scrollLyricsTo(l, l.nowLyrics, anchor, 1)
+	if changed && len(l.Lines) > 0 {
+		anchor := l.Timeline.ScrollToIndex
+		if anchor > len(l.Lines) {
+			anchor = len(l.Lines)
+		}
+		if anchor >= 0 {
+			lineAnimationLayer.scrollLyricsTo(l, l.nowLyrics, anchor, 1)
+		}
 	}
 }
 
@@ -539,9 +673,13 @@ func (AnimationLayer) requestScrollRelayout(l *Lyrics) {
 	if l == nil || len(l.Lines) == 0 {
 		return
 	}
-	anchor := predictedScrollAnchorIndex(l.Lines, l.Position)
+	ensureTimelineState(l)
+	anchor := l.Timeline.ScrollToIndex
 	if anchor < 0 {
 		anchor = l.anchorIndex
+	}
+	if anchor < 0 {
+		anchor = predictedScrollAnchorIndex(l.Lines, l.Position)
 	}
 	lineAnimationLayer.scrollLyricsTo(l, l.nowLyrics, anchor, 1)
 }
@@ -554,35 +692,8 @@ func (AnimationLayer) NormalizeLine(l *Line, lyrics *Lyrics) {
 	l.setStatus(LineStatusActiveExit)
 
 	if l.ScaleAnimate != nil {
-		l.ScaleAnimate.Cancel()
+		cancelManagedAnimation(lyrics.AnimateManager, l.ScaleAnimate)
 		l.ScaleAnimate = nil
-	}
-	if !l.IsBackground {
-		targetScale := inactiveLineScale(l.fontsize)
-		if needsAnimation(l.GetPosition().GetScaleX(), targetScale) || needsAnimation(l.GetPosition().GetScaleY(), targetScale) {
-			l.ScaleAnimate = anim.NewTween(
-				uuid.NewString(),
-				lineExitDuration,
-				0,
-				1,
-				l.GetPosition().GetScaleX(),
-				targetScale,
-				anim.EaseInOut,
-				func(value float64) {
-					l.GetPosition().SetScaleX(value)
-					l.GetPosition().SetScaleY(value)
-				},
-				func() {
-					l.ScaleAnimate = nil
-					l.GetPosition().SetScaleX(targetScale)
-					l.GetPosition().SetScaleY(targetScale)
-				},
-			)
-			lyrics.AnimateManager.Add(l.ScaleAnimate)
-		} else {
-			l.GetPosition().SetScaleX(targetScale)
-			l.GetPosition().SetScaleY(targetScale)
-		}
 	}
 	if l.GradientColorAnimate != nil {
 		l.GradientColorAnimate.Cancel()
@@ -737,32 +848,9 @@ func (AnimationLayer) LineAnimate(l *Line, lyrics *Lyrics, fd float64) {
 	lineAnimationLayer.cancelLineStatusSettle(l, lyrics.AnimateManager)
 	l.setStatus(LineStatusActiveEnter)
 	if l.ScaleAnimate != nil {
-		l.ScaleAnimate.Cancel()
+		cancelManagedAnimation(lyrics.AnimateManager, l.ScaleAnimate)
 		l.ScaleAnimate = nil
 	}
-	l.ScaleAnimate = anim.NewTween(
-		uuid.NewString(),
-		lineEnterDuration,
-		0,
-		1,
-		l.GetPosition().GetScaleX(),
-		1,
-		anim.EaseInOut,
-		func(value float64) {
-			l.GetPosition().SetScaleX(value)
-			l.GetPosition().SetScaleY(value)
-		},
-		func() {
-			l.ScaleAnimate = nil
-			l.GetPosition().SetScaleX(1)
-			l.GetPosition().SetScaleY(1)
-			if l.Status == LineStatusActiveEnter {
-				l.setStatus(LineStatusActivePlaying)
-			}
-		},
-	)
-	lyrics.AnimateManager.Add(l.ScaleAnimate)
-
 	lineAnimationLayer.FrameAnimate(l, lyrics, fd)
 
 	for _, it := range l.BackgroundLines {
@@ -772,7 +860,6 @@ func (AnimationLayer) LineAnimate(l *Line, lyrics *Lyrics, fd float64) {
 			it.AlphaAnimate.Cancel()
 			it.AlphaAnimate = nil
 		}
-		targetScale := inactiveLineScale(it.fontsize)
 		it.AlphaAnimate = anim.NewKeyframeAnimation(
 			uuid.NewString(),
 			backgroundEnterDuration,
@@ -780,19 +867,15 @@ func (AnimationLayer) LineAnimate(l *Line, lyrics *Lyrics, fd float64) {
 			1,
 			false,
 			[]anim.Keyframe{
-				{Offset: 0, Values: []float64{it.GetPosition().GetAlpha(), it.GetPosition().GetScaleX()}, Ease: anim.EaseOut},
-				{Offset: 1, Values: []float64{1, targetScale}, Ease: anim.EaseOut},
+				{Offset: 0, Values: []float64{it.GetPosition().GetAlpha()}, Ease: anim.EaseOut},
+				{Offset: 1, Values: []float64{1}, Ease: anim.EaseOut},
 			},
 			func(value []float64) {
 				it.Position.SetAlpha(value[0])
-				it.Position.SetScaleX(value[1])
-				it.Position.SetScaleY(value[1])
 			},
 			func() {
 				it.AlphaAnimate = nil
 				it.Position.SetAlpha(1)
-				it.Position.SetScaleX(targetScale)
-				it.Position.SetScaleY(targetScale)
 				if it.Status == LineStatusActiveEnter {
 					it.setStatus(LineStatusActivePlaying)
 				}
@@ -1163,6 +1246,7 @@ func (AnimationLayer) DisposeLyrics(l *Lyrics) {
 	for _, line := range l.Lines {
 		lineRendererLayer.DisposeLine(line)
 	}
+	l.Bottom.Dispose()
 	l.nowLyrics = nil
 	l.renderIndex = nil
 	l.Lines = nil

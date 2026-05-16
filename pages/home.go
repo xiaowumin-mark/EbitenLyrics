@@ -59,6 +59,8 @@ type Home struct {
 	FD                 float64
 	UserScale          float64
 	SmartTranslateWrap bool
+	EnableBlur         bool
+	BlurStrength       float64
 
 	eventsBound bool
 
@@ -69,30 +71,33 @@ type Home struct {
 	currentFamily string
 	fontConfig    string
 
-	pendingMu             sync.Mutex
-	hasPendingLyrics      bool
-	pendingLyrics         []ttml.LyricLine
-	hasPendingProgress    bool
-	pendingProgress       time.Duration
-	hasPendingCover       bool
-	pendingCover          image.Image
-	hasPendingLowFreq     bool
-	pendingLowFreqVolume  float64
-	hasPendingFontConfig  bool
-	pendingFontConfig     map[string]any
-	hasLatestProgress     bool
-	latestProgress        time.Duration
-	isUserScrolling       bool
-	manualScrollOffset    float64
-	manualScrollTarget    float64
-	manualScrollResumeAt  time.Time
-	manualScrollReturnAni *anim.Tween
+	pendingMu            sync.Mutex
+	hasPendingLyrics     bool
+	pendingLyrics        []ttml.LyricLine
+	hasPendingProgress   bool
+	pendingProgress      time.Duration
+	hasPendingPlayState  bool
+	pendingPlaying       bool
+	hasPendingCover      bool
+	pendingCover         image.Image
+	hasPendingLowFreq    bool
+	pendingLowFreqVolume float64
+	hasPendingFontConfig bool
+	pendingFontConfig    map[string]any
+	hasPendingMusicInfo  bool
+	pendingCreatorText   string
+	hasLatestProgress    bool
+	latestProgress       time.Duration
+	isUserScrolling      bool
+	manualScrollResetAt  time.Time
+	currentCreatorText   string
 
 	lastMemSampleAt   time.Time
 	memSampleInterval time.Duration
 	memPanel          string
 
 	lastProgress       time.Duration
+	isPlaying          bool
 	DebugPanel         *debugpanel.Panel
 	debugInputCaptured bool
 }
@@ -616,6 +621,12 @@ func (h *Home) setupDebugPanel() {
 		}).
 		Bool("智能翻译换行", &h.SmartTranslateWrap, func(value bool) {
 			h.setSmartTranslateWrap(value)
+		}).
+		Bool("启用歌词模糊", &h.EnableBlur, func(value bool) {
+			h.setEnableBlur(value)
+		}).
+		Float("歌词模糊强度", &h.BlurStrength, 0.25, 4, 0.05, 2, func(value float64) {
+			h.setBlurStrength(value)
 		})
 
 	panel.Group("字体", true).
@@ -677,12 +688,34 @@ func (h *Home) setSmartTranslateWrap(enabled bool) {
 	}
 }
 
+func (h *Home) setEnableBlur(enabled bool) {
+	h.EnableBlur = enabled
+	if h.LyricsControl != nil {
+		h.LyricsControl.SetEnableBlur(enabled)
+	}
+}
+
+func (h *Home) setBlurStrength(strength float64) {
+	h.BlurStrength = strength
+	if h.LyricsControl != nil {
+		h.LyricsControl.SetBlurStrength(strength)
+	}
+}
+
 func (h *Home) queueProgress(progress time.Duration) {
 	h.pendingMu.Lock()
 	h.hasPendingProgress = true
 	h.pendingProgress = progress
 	h.latestProgress = progress
 	h.hasLatestProgress = true
+	h.pendingMu.Unlock()
+}
+
+func (h *Home) queuePlayState(playing bool) {
+	h.pendingMu.Lock()
+	h.hasPendingPlayState = true
+	h.pendingPlaying = playing
+	h.isPlaying = playing
 	h.pendingMu.Unlock()
 }
 
@@ -718,18 +751,41 @@ func (h *Home) queueFontConfig(cfg map[string]any) {
 	h.pendingMu.Unlock()
 }
 
+func (h *Home) queueMusicInfo(data map[string]interface{}) {
+	creatorText := bottomLineCreatorTextFromMusic(data)
+	h.pendingMu.Lock()
+	h.hasPendingMusicInfo = true
+	h.pendingCreatorText = creatorText
+	h.pendingMu.Unlock()
+}
+
+func (h *Home) applyBottomLineText() {
+	if h.LyricsControl == nil {
+		return
+	}
+	if h.currentCreatorText == "" {
+		h.LyricsControl.ClearBottomLine()
+		return
+	}
+	h.LyricsControl.SetBottomLineText(h.currentCreatorText)
+}
+
 func (h *Home) applyPendingEvents() {
 	var (
 		hasLyrics      bool
 		lyricsLines    []ttml.LyricLine
 		hasProgress    bool
 		progress       time.Duration
+		hasPlayState   bool
+		playing        bool
 		hasCover       bool
 		coverImage     image.Image
 		hasLowFreq     bool
 		lowFreqVolume  float64
 		hasFontConfig  bool
 		fontConfigData map[string]any
+		hasMusicInfo   bool
+		creatorText    string
 	)
 
 	h.pendingMu.Lock()
@@ -743,6 +799,11 @@ func (h *Home) applyPendingEvents() {
 		hasProgress = true
 		progress = h.pendingProgress
 		h.hasPendingProgress = false
+	}
+	if h.hasPendingPlayState {
+		hasPlayState = true
+		playing = h.pendingPlaying
+		h.hasPendingPlayState = false
 	}
 	if h.hasPendingCover {
 		hasCover = true
@@ -761,10 +822,19 @@ func (h *Home) applyPendingEvents() {
 		h.hasPendingFontConfig = false
 		h.pendingFontConfig = nil
 	}
+	if h.hasPendingMusicInfo {
+		hasMusicInfo = true
+		creatorText = h.pendingCreatorText
+		h.hasPendingMusicInfo = false
+		h.pendingCreatorText = ""
+	}
 	h.pendingMu.Unlock()
 
 	if hasLyrics && h.LyricsControl != nil {
 		h.LyricsControl.SetLyrics(lyricsLines)
+		h.LyricsControl.SetEnableBlur(h.EnableBlur)
+		h.LyricsControl.SetBlurStrength(h.BlurStrength)
+		h.applyBottomLineText()
 		if h.hasLatestProgress && !h.isUserScrolling {
 			h.LyricsControl.Update(h.latestProgress)
 		}
@@ -794,6 +864,15 @@ func (h *Home) applyPendingEvents() {
 		h.applyMapFontConfig(fontConfigData)
 	}
 
+	if hasMusicInfo {
+		h.currentCreatorText = creatorText
+		h.applyBottomLineText()
+	}
+
+	if hasPlayState && h.LyricsControl != nil {
+		h.LyricsControl.SetPlaying(playing)
+	}
+
 	if hasLowFreq && h.MeshRenderer != nil {
 		h.MeshRenderer.SetLowFreqVolume(lowFreqVolume)
 	}
@@ -805,70 +884,33 @@ func (h *Home) applyPendingEvents() {
 
 func (h *Home) beginUserScroll() {
 	h.isUserScrolling = true
-	h.manualScrollResumeAt = time.Now().Add(time.Second)
-	if h.manualScrollReturnAni != nil {
-		h.manualScrollReturnAni.Cancel()
-		h.manualScrollReturnAni = nil
+	if h.LyricsControl != nil {
+		h.LyricsControl.SetUserScrolling(true)
 	}
-}
-
-func (h *Home) clampScrollTarget() {
-	_, wh := ebiten.WindowSize()
-	maxAbs := math.Max(200, lp.FromLP(float64(wh))*2.5)
-	if h.manualScrollTarget > maxAbs {
-		h.manualScrollTarget = maxAbs
-	}
-	if h.manualScrollTarget < -maxAbs {
-		h.manualScrollTarget = -maxAbs
-	}
+	h.manualScrollResetAt = time.Now().Add(5 * time.Second)
 }
 
 func (h *Home) handleWheelScroll() {
 	_, wy := ebiten.Wheel()
 	if wy != 0 {
 		h.beginUserScroll()
-		h.manualScrollTarget += -wy * math.Max(24, h.FontSize*0.85)
-		h.clampScrollTarget()
+		if h.LyricsControl != nil {
+			h.LyricsControl.AddWheelScroll(-wy * math.Max(24, h.FontSize*0.85))
+		}
 	}
 
-	if h.isUserScrolling {
-		h.manualScrollOffset += (h.manualScrollTarget - h.manualScrollOffset) * 0.23
-		if math.Abs(h.manualScrollTarget-h.manualScrollOffset) < 0.2 {
-			h.manualScrollOffset = h.manualScrollTarget
-		}
-
-		if time.Now().After(h.manualScrollResumeAt) {
-			h.isUserScrolling = false
-			from := h.manualScrollOffset
-			if h.manualScrollReturnAni != nil {
-				h.manualScrollReturnAni.Cancel()
-				h.manualScrollReturnAni = nil
-			}
-			h.manualScrollReturnAni = anim.NewTween(
-				"home-manual-scroll-return",
-				380*time.Millisecond,
-				0,
-				1,
-				from,
-				0,
-				anim.EaseOut,
-				func(value float64) {
-					h.manualScrollOffset = value
-					h.manualScrollTarget = value
-				},
-				func() {
-					h.manualScrollOffset = 0
-					h.manualScrollTarget = 0
-					h.manualScrollReturnAni = nil
-				},
-			)
-			if h.AnimateManager != nil {
-				h.AnimateManager.Add(h.manualScrollReturnAni)
-			}
-			if h.hasLatestProgress && h.LyricsControl != nil {
-				h.LyricsControl.Update(h.latestProgress)
+	if h.isUserScrolling && !h.manualScrollResetAt.IsZero() && time.Now().After(h.manualScrollResetAt) {
+		h.isUserScrolling = false
+		progressToRestore := h.latestProgress
+		hasProgressToRestore := h.hasLatestProgress
+		if h.LyricsControl != nil {
+			h.LyricsControl.SetUserScrolling(false)
+			h.LyricsControl.ResetScroll()
+			if hasProgressToRestore {
+				h.LyricsControl.Update(progressToRestore)
 			}
 		}
+		h.manualScrollResetAt = time.Time{}
 	}
 }
 
@@ -910,6 +952,19 @@ func (h *Home) bindEvents() {
 		// 更新状态并执行回调
 		h.lastProgress = newProgress
 		h.queueProgress(newProgress)
+	})
+
+	evbus.Bus.Subscribe("ws:playState", func(value map[string]interface{}) {
+		playing, ok := parsePlayingFromState(value)
+		if !ok {
+			log.Printf("parse play state failed: %+v", value)
+			return
+		}
+		h.queuePlayState(playing)
+	})
+
+	evbus.Bus.Subscribe("ws:setMusic", func(value map[string]interface{}) {
+		h.queueMusicInfo(value)
 	})
 
 	evbus.Bus.Subscribe("ws:fontConfig", func(value map[string]any) {
@@ -957,6 +1012,9 @@ func (h *Home) OnCreate() {
 	ww, hh := ebiten.WindowSize()
 	h.FontSize = 50
 	h.FD = 0.5
+	h.EnableBlur = true
+	h.BlurStrength = 1
+	h.isPlaying = true
 	h.UserScale = lp.UserScale()
 	h.SmartTranslateWrap = true
 	h.fontWeight = h.FontRequest.Weight
@@ -984,6 +1042,8 @@ func (h *Home) OnCreate() {
 	)
 	h.LyricsControl.Init()
 	h.LyricsControl.SetSmartTranslateWrap(h.SmartTranslateWrap)
+	h.LyricsControl.SetEnableBlur(h.EnableBlur)
+	h.LyricsControl.SetBlurStrength(h.BlurStrength)
 	meshRenderer, err := bgrender.NewMeshGradientRenderer(ww, hh)
 	if err != nil {
 		log.Printf("create mesh renderer failed: %v", err)
@@ -1054,6 +1114,9 @@ func (h *Home) Update() error {
 	if h.MeshRenderer != nil {
 		h.MeshRenderer.Update(dt)
 	}
+	if h.LyricsControl != nil {
+		h.LyricsControl.Tick(dt)
+	}
 
 	h.CoverPosition.Rotate += 0.5
 	if h.CoverPosition.Rotate > 360 {
@@ -1118,9 +1181,7 @@ func (h *Home) Draw(screen *ebiten.Image) {
 		screen.DrawImage(h.Cover, op)
 	}
 	if h.LyricsControl != nil {
-		pos := lyrics.NewPosition(0, 0, 0, 0)
-		pos.SetTranslateY(h.manualScrollOffset)
-		h.LyricsControl.Draw(screen, &pos)
+		h.LyricsControl.Draw(screen, nil)
 	}
 	if h.DebugPanel != nil {
 		h.DebugPanel.Draw(screen)

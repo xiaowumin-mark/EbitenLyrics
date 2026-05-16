@@ -61,6 +61,98 @@ const (
 	RenderModeLine
 )
 
+type TimelineState struct {
+	CurrentTime           time.Duration
+	LastCurrentTime       time.Duration
+	HotLines              map[int]struct{}
+	BufferedLines         map[int]struct{}
+	ScrollToIndex         int
+	IsSeeking             bool
+	IsPlaying             bool
+	InitialLayoutFinished bool
+}
+
+type LinePresentation struct {
+	IsActive     bool
+	TargetAlpha  float64
+	TargetScale  float64
+	BlurLevel    float64
+	RenderMode   LyricRenderMode
+	ReserveSpace bool
+}
+
+type Interlude struct {
+	StartTime       time.Duration
+	EndTime         time.Duration
+	AnchorLineIndex int
+	IsNextDuet      bool
+}
+
+type InterludeDots struct {
+	Position    Position
+	Active      bool
+	Paused      bool
+	CurrentTime time.Duration
+	StartTime   time.Duration
+	EndTime     time.Duration
+	DotSize     float64
+	Gap         float64
+	PaddingX    float64
+	PaddingY    float64
+	Margin      float64
+	GlobalScale float64
+	GlobalAlpha float64
+	IsDuet      bool
+	DotAlphas   [3]float64
+}
+
+type BottomLine struct {
+	Position        Position
+	PosXSpring      *anim.Spring
+	PosYSpring      *anim.Spring
+	BlurLevel       float64
+	Focused         bool
+	Active          bool
+	Text            string
+	LineSize        [2]float64
+	FontManager     *ft.FontManager
+	FontRequest     ft.FontRequest
+	FontSize        float64
+	ContentFontSize float64
+	PaddingLeft     float64
+	PaddingTop      float64
+	Image           *ebiten.Image
+	BlurImage       *ebiten.Image
+	BlurCacheSource *ebiten.Image
+	BlurCacheKey    int
+	ImageDirty      bool
+}
+
+type LayoutAlignAnchor int
+
+const (
+	LayoutAlignAnchorTop LayoutAlignAnchor = iota
+	LayoutAlignAnchorCenter
+	LayoutAlignAnchorBottom
+)
+
+type LayoutState struct {
+	TargetAlignIndex   int
+	LastInterludeState bool
+	AlignAnchor        LayoutAlignAnchor
+	AlignPosition      float64
+	OverscanPx         float64
+	HidePassedLines    bool
+	EnableBlur         bool
+	BlurStrength       float64
+	IsUserScrolling    bool
+	ScrollOffset       float64
+	ScrollMinOffset    float64
+	ScrollMaxOffset    float64
+	AllowScroll        bool
+	IsScrolled         bool
+}
+
 type LineSyllable struct {
 	StartTime time.Duration
 	EndTime   time.Duration
@@ -101,20 +193,28 @@ type Line struct {
 	BackgroundLines    []*Line
 	Participle         [][]int
 	SmartTranslateWrap bool
+	HasDuetInSong      bool
 
 	// RenderMode 由加载阶段统一判定后写入，布局和动画直接读取该值。
 	RenderMode LyricRenderMode
 
-	lineHeight float64
-	Padding    float64
+	lineHeight   float64
+	Padding      float64
+	PaddingLeft  float64
+	PaddingRight float64
 
 	IsBackground bool
 	IsDuet       bool
 
 	Image                            *ebiten.Image
+	BlurImage                        *ebiten.Image
+	BlurCacheSource                  *ebiten.Image
+	BlurCacheKey                     int
 	TranslateImage                   *ebiten.Image
 	TranslateImageW, TranslateImageH float64
 	Position                         Position
+	Presentation                     LinePresentation
+	BlurLevel                        float64
 
 	FontManager *ft.FontManager
 	FontRequest ft.FontRequest
@@ -128,6 +228,8 @@ type Line struct {
 	StatusSettleAnimate *anim.Tween
 
 	ScrollAnimate        *anim.Tween
+	PosYSpring           *anim.Spring
+	ScaleSpring          *anim.Spring
 	AlphaAnimate         *anim.KeyframeAnimation
 	GradientColorAnimate *anim.Tween
 	ScaleAnimate         *anim.Tween
@@ -147,14 +249,20 @@ type LyricMeta struct {
 }
 
 type Lyrics struct {
-	Meta  LyricMeta
-	Lines []*Line
+	Meta        LyricMeta
+	Lines       []*Line
+	FontManager *ft.FontManager
+	FontRequest ft.FontRequest
 
 	// RenderMode 表示整首歌词采用的渲染模式。
 	// 通过“多数行判定”得到，避免因首行特例导致误判。
 	RenderMode LyricRenderMode
 
 	Position time.Duration
+	Timeline TimelineState
+	Layout   LayoutState
+	Dots     InterludeDots
+	Bottom   BottomLine
 
 	nowLyrics          []int
 	renderIndex        []int
@@ -164,6 +272,7 @@ type Lyrics struct {
 	Margin        float64
 	HighlightTime time.Duration
 	FD            float64
+	Width         float64
 
 	AnimateManager *anim.Manager
 }
