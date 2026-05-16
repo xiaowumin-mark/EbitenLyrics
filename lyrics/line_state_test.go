@@ -86,8 +86,8 @@ func TestScrollDelayForIndexUsesLeadCompensationModel(t *testing.T) {
 	if got := scrollDelayForIndex(5, 5); got != base {
 		t.Fatalf("anchor delay = %v, want %v", got, base)
 	}
-	if got := scrollDelayForIndex(5, 4); got != base {
-		t.Fatalf("upper delay = %v, want %v", got, base)
+	if got := scrollDelayForIndex(5, 4); got != base-scrollDelayStep {
+		t.Fatalf("upper delay = %v, want %v", got, base-scrollDelayStep)
 	}
 	if got := scrollDelayForIndex(5, 6); got != base+scrollDelayStep {
 		t.Fatalf("lower adjacent delay = %v, want %v", got, base+scrollDelayStep)
@@ -142,6 +142,7 @@ func TestUpdateFinalLayoutStateArmsWhenBackgroundStillVisible(t *testing.T) {
 	bgLine := NewLine(0, time.Second, false, true, "", nil, ft.FontRequest{}, 24)
 	bgLine.isShow = true
 	bgLine.GetPosition().SetAlpha(1)
+	bgLine.setStatus(LineStatusActivePlaying)
 	mainLine.BackgroundLines = []*Line{bgLine}
 
 	lyrics := &Lyrics{
@@ -177,6 +178,44 @@ func TestUpdateFinalLayoutStateTriggersOnceBackgroundGone(t *testing.T) {
 	}
 	if lyrics.finalLayoutPending {
 		t.Fatal("final layout pending should be cleared after relayout trigger")
+	}
+}
+
+func TestBackgroundLineReservesSpaceDuringDelayedEnter(t *testing.T) {
+	bgLine := NewLine(0, time.Second, false, true, "", nil, ft.FontRequest{}, 24)
+	bgLine.isShow = true
+	bgLine.GetPosition().SetAlpha(0)
+	bgLine.setStatus(LineStatusActiveEnter)
+
+	if !backgroundLineReservesSpace(bgLine) {
+		t.Fatal("background line should reserve space while entering even before fade-in alpha advances")
+	}
+}
+
+func TestBackgroundLineReleasesSpaceDuringExitFade(t *testing.T) {
+	bgLine := NewLine(0, time.Second, false, true, "", nil, ft.FontRequest{}, 24)
+	bgLine.isShow = true
+	bgLine.GetPosition().SetAlpha(0.5)
+	bgLine.setStatus(LineStatusActiveExit)
+
+	if backgroundLineReservesSpace(bgLine) {
+		t.Fatal("background line should release space while its exit fade is being pulled back by the next line")
+	}
+
+	bgLine.GetPosition().SetAlpha(0)
+	if backgroundLineReservesSpace(bgLine) {
+		t.Fatal("background line should release space after its exit fade reaches zero")
+	}
+}
+
+func TestShouldUseFastScrollSkipsLinesWithBackground(t *testing.T) {
+	current := NewLine(0, time.Second, false, false, "", nil, ft.FontRequest{}, 32)
+	target := NewLine(time.Second, 2*time.Second, false, false, "", nil, ft.FontRequest{}, 32)
+	current.BackgroundLines = []*Line{NewLine(0, time.Second, false, true, "", nil, ft.FontRequest{}, 24)}
+
+	lyrics := &Lyrics{Lines: []*Line{current, target}}
+	if shouldUseFastScroll(lyrics, 0, 1) {
+		t.Fatal("fast scroll should be disabled when background lyrics participate in the transition")
 	}
 }
 

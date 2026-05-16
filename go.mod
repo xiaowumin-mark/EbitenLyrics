@@ -1,6 +1,6 @@
 module github.com/xiaowumin-mark/EbitenLyrics
 
-go 1.25.1
+go 1.25.5
 
 require (
 	github.com/asaskevich/EventBus v0.0.0-20200907212545-49d423059eef
@@ -28,6 +28,7 @@ require (
 	github.com/golang/freetype v0.0.0-20170609003504-e2365dfdc4a0 // indirect
 	github.com/hajimehoshi/bitmapfont/v4 v4.1.0 // indirect
 	github.com/jezek/xgb v1.1.1 // indirect
+	github.com/madelynnblue/go-dsp v1.0.0 // indirect
 	github.com/pierrec/lz4/v4 v4.1.22 // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect
 	github.com/tdewolff/parse/v2 v2.8.5 // indirect

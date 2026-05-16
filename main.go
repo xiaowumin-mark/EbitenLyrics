@@ -106,7 +106,7 @@ func main() {
 	lp.SetUserScale(1.0)
 
 	ebiten.SetWindowSize(lp.LPInt(1100), lp.LPInt(670))
-	//ebiten.SetWindowSize(lp.LPInt(1125/2), lp.LPInt(2434/2))
+	//ebiten.SetWindowSize(lp.LPInt(1125/1.5), lp.LPInt(2436/1.5))
 
 	game.animMgr = anim.NewManager(false)
 
@@ -121,6 +121,11 @@ func main() {
 		AnimateManager: game.animMgr,
 	})
 	router.Add("manage", &pages.Manage{
+		FontManager:    game.fontManager,
+		FontRequest:    game.fontRequest,
+		AnimateManager: game.animMgr,
+	})
+	router.Add("drum_analyzer", &pages.DrumAnalyzer{
 		FontManager:    game.fontManager,
 		FontRequest:    game.fontRequest,
 		AnimateManager: game.animMgr,
