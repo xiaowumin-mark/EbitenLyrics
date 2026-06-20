@@ -23,9 +23,10 @@ const (
 )
 
 type FontRequest struct {
-	Families []string
-	Weight   Weight
-	Italic   bool
+	Families   []string
+	Weight     Weight
+	Italic     bool
+	RequireCJK bool
 }
 
 func (r FontRequest) Normalized() FontRequest {
@@ -43,7 +44,7 @@ func (r FontRequest) CacheKey() string {
 	for _, family := range r.Families {
 		parts = append(parts, normalizeName(family))
 	}
-	return fmt.Sprintf("%s|%d|%t", strings.Join(parts, ","), r.Weight, r.Italic)
+	return fmt.Sprintf("%s|%d|%t|%t", strings.Join(parts, ","), r.Weight, r.Italic, r.RequireCJK)
 }
 
 type ResolvedFontChain struct {

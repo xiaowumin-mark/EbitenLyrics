@@ -1,6 +1,7 @@
 package lyrics
 
 import (
+	"math"
 	"testing"
 	"time"
 
@@ -192,6 +193,37 @@ func TestBackgroundLineReservesSpaceDuringDelayedEnter(t *testing.T) {
 	}
 }
 
+func TestBackgroundEnterAnimationMatchesRefTimingAndAlpha(t *testing.T) {
+	if backgroundEnterDuration != 500*time.Millisecond {
+		t.Fatalf("background enter duration = %v, want ref 500ms", backgroundEnterDuration)
+	}
+	if backgroundEnterDelay != 250*time.Millisecond {
+		t.Fatalf("background enter delay = %v, want ref 250ms", backgroundEnterDelay)
+	}
+	if backgroundActiveAlpha != 0.4 {
+		t.Fatalf("background active alpha = %v, want ref 0.4", backgroundActiveAlpha)
+	}
+}
+
+func TestBackgroundLineAnimateTargetsRefAlpha(t *testing.T) {
+	manager := anim.NewManager(false)
+	mainLine := NewLine(0, time.Second, false, false, "", nil, ft.FontRequest{}, 32)
+	bgLine := NewLine(0, time.Second, false, true, "", nil, ft.FontRequest{}, 24)
+	mainLine.BackgroundLines = []*Line{bgLine}
+	lyrics := &Lyrics{AnimateManager: manager, Lines: []*Line{mainLine}}
+
+	lineAnimationLayer.LineAnimate(mainLine, lyrics, 0.5)
+	if bgLine.AlphaAnimate == nil {
+		t.Fatal("background alpha animation should be created")
+	}
+	bgLine.AlphaAnimate.Start()
+	bgLine.AlphaAnimate.Update(backgroundEnterDelay + backgroundEnterDuration - time.Millisecond)
+
+	if math.Abs(bgLine.GetPosition().GetAlpha()-backgroundActiveAlpha) > 1e-9 {
+		t.Fatalf("background alpha = %v, want %v", bgLine.GetPosition().GetAlpha(), backgroundActiveAlpha)
+	}
+}
+
 func TestBackgroundLineReleasesSpaceDuringExitFade(t *testing.T) {
 	bgLine := NewLine(0, time.Second, false, true, "", nil, ft.FontRequest{}, 24)
 	bgLine.isShow = true
@@ -304,6 +336,85 @@ func TestNormalizeLineSettlesActiveHighlightInsteadOfResettingImmediately(t *tes
 	}
 	if element.BackgroundBlurText != nil {
 		t.Fatal("blur shadow should be disposed after highlight settle")
+	}
+}
+
+func TestHideLineWithManagerResetsInterruptedRealtimePreviewContent(t *testing.T) {
+	manager := anim.NewManager(false)
+	line := NewLine(0, time.Second, false, false, "", nil, ft.FontRequest{}, 32)
+	element := &SyllableElement{
+		Position:           NewPosition(0, 0, 10, 10),
+		Alpha:              0.7,
+		NowOffset:          -4,
+		BackgroundBlurText: &TextShadow{Alpha: 0.5},
+	}
+	element.Position.SetTranslateX(12)
+	element.Position.SetTranslateY(-6)
+	element.Position.SetScaleX(1.12)
+	element.Position.SetScaleY(1.08)
+	line.OuterSyllableElements = []*SyllableElement{element}
+	line.isShow = true
+	line.imageDirty = false
+	line.setStatus(LineStatusActiveExit)
+
+	lineRendererLayer.HideLineWithManager(line, manager)
+
+	if line.Status != LineStatusPreviewStatic {
+		t.Fatalf("status = %v, want preview static", line.Status)
+	}
+	if line.isShow {
+		t.Fatal("line should be hidden after soft hide")
+	}
+	if got := element.Alpha; got != 0 {
+		t.Fatalf("element alpha = %v, want 0", got)
+	}
+	if got := element.GetPosition().GetTranslateX(); got != 0 {
+		t.Fatalf("translateX = %v, want 0", got)
+	}
+	if got := element.GetPosition().GetTranslateY(); got != 0 {
+		t.Fatalf("translateY = %v, want 0", got)
+	}
+	if got := element.GetPosition().GetScaleX(); got != 1 {
+		t.Fatalf("scaleX = %v, want 1", got)
+	}
+	if got := element.GetPosition().GetScaleY(); got != 1 {
+		t.Fatalf("scaleY = %v, want 1", got)
+	}
+	if element.BackgroundBlurText != nil {
+		t.Fatal("blur shadow should be disposed")
+	}
+	if !line.imageDirty {
+		t.Fatal("reset preview content should dirty the preview bitmap")
+	}
+}
+
+func TestPreviewBitmapDirtyWhenExitHighlightFinishesAfterStatusSettle(t *testing.T) {
+	manager := anim.NewManager(false)
+	lyrics := &Lyrics{AnimateManager: manager}
+	line := NewLine(0, time.Second, false, true, "", nil, ft.FontRequest{}, 32)
+	element := &SyllableElement{
+		Position: NewPosition(0, 0, 10, 10),
+		Alpha:    1,
+	}
+	line.OuterSyllableElements = []*SyllableElement{element}
+	line.setStatus(LineStatusActivePlaying)
+
+	lineAnimationLayer.NormalizeLine(line, lyrics)
+	for elapsed := time.Duration(0); elapsed < backgroundExitDuration; elapsed += 50 * time.Millisecond {
+		manager.Update(50 * time.Millisecond)
+	}
+	if line.Status != LineStatusPreviewStatic {
+		t.Fatalf("status = %v, want preview static", line.Status)
+	}
+
+	line.imageDirty = false
+	manager.Update(lineHighlightFadeDuration - backgroundExitDuration)
+
+	if got := element.Alpha; got != 0 {
+		t.Fatalf("element alpha = %v, want 0", got)
+	}
+	if !line.imageDirty {
+		t.Fatal("preview bitmap should be dirtied by the late highlight finish")
 	}
 }
 

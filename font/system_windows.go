@@ -34,6 +34,14 @@ func (m *FontManager) searchFamilyPlatform(family string) ([]fontRecord, bool, e
 		return records, true, nil
 	}
 
+	records, err = m.searchFamilyInWindowsFontDirectoriesByName(family)
+	if err != nil {
+		return nil, true, err
+	}
+	if len(records) > 0 {
+		return records, true, nil
+	}
+
 	if records := m.peekWindowsSystemIndex(); len(records) > 0 {
 		return filterRecordsByFamily(records, family), true, nil
 	}
@@ -139,6 +147,114 @@ func loadWindowsFontRegistryEntries() ([]windowsRegistryFontEntry, error) {
 	}
 
 	return out, nil
+}
+
+func (m *FontManager) searchFamilyInWindowsFontDirectoriesByName(family string) ([]fontRecord, error) {
+	target := normalizeName(family)
+	if target == "" {
+		return nil, nil
+	}
+
+	candidates := make([]fontRecord, 0, 8)
+	seen := map[string]struct{}{}
+	for _, dir := range windowsFontDirectories() {
+		info, err := os.Stat(dir)
+		if err != nil || !info.IsDir() {
+			continue
+		}
+
+		_ = filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
+			if err != nil || d.IsDir() || !supportsIndexedFontFile(path) {
+				return nil
+			}
+			if !windowsFontFileLikelyMatches(path, target) {
+				return nil
+			}
+
+			path = filepath.Clean(path)
+			if _, ok := seen[path]; ok {
+				return nil
+			}
+			seen[path] = struct{}{}
+
+			records, err := m.inspectCachedPath(path)
+			if err != nil || len(records) == 0 {
+				candidates = append(candidates, aliasRecordsFromFontFileName(path, family)...)
+				return nil
+			}
+			candidates = append(candidates, withAlias(records, family)...)
+			return nil
+		})
+	}
+
+	return filterRecordsByFamily(candidates, family), nil
+}
+
+func windowsFontFileLikelyMatches(path, target string) bool {
+	if target == "" {
+		return false
+	}
+	base := strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
+	normalized := normalizeName(base)
+	if normalized == "" {
+		return false
+	}
+	return normalized == target ||
+		strings.HasPrefix(normalized, target) ||
+		strings.Contains(normalized, target) ||
+		strings.HasPrefix(target, normalized)
+}
+
+func aliasRecordsFromFontFileName(path, family string) []fontRecord {
+	path = filepath.Clean(path)
+	count := 1
+	if mapped, err := mmapFile(path); err == nil {
+		count = fontFaceCount(mapped)
+		_ = mapped.Unmap()
+	}
+	if count < 1 {
+		count = 1
+	}
+
+	weight, italic := fontStyleFromPath(path)
+	records := make([]fontRecord, 0, count)
+	for i := 0; i < count; i++ {
+		records = append(records, fontRecord{
+			Path:            path,
+			CollectionIndex: i,
+			Family:          family,
+			Style:           formatStyle(weight, italic),
+			Weight:          weight,
+			Italic:          italic,
+			Aliases:         []string{family},
+		})
+	}
+	return records
+}
+
+func fontStyleFromPath(path string) (Weight, bool) {
+	name := normalizeName(strings.TrimSuffix(filepath.Base(path), filepath.Ext(path)))
+	italic := strings.Contains(name, "italic")
+	for _, candidate := range []struct {
+		token  string
+		weight Weight
+	}{
+		{"ultralight", WeightExtraLight},
+		{"extralight", WeightExtraLight},
+		{"semibold", WeightSemiBold},
+		{"extrabold", WeightExtraBold},
+		{"black", WeightBlack},
+		{"heavy", WeightBlack},
+		{"bold", WeightBold},
+		{"medium", WeightMedium},
+		{"light", WeightLight},
+		{"thin", WeightThin},
+	} {
+		if strings.Contains(name, candidate.token) {
+			return candidate.weight, italic
+		}
+	}
+	return WeightRegular, italic
 }
 
 func windowsRegistryNameLikelyMatches(name, target string) bool {

@@ -85,7 +85,10 @@ func (l *LyricsComponent) Init() {
 	l.recreateImage()
 }
 
-func releaseLyricsMemory() {
+func releaseLyricsMemory(force bool) {
+	if !force {
+		return
+	}
 	lyrics.PurgeSharedImageCache()
 	runtime.GC()
 	debug.FreeOSMemory()
@@ -111,6 +114,10 @@ func crossfadeProgress(start time.Time, duration time.Duration, now time.Time) f
 func (l *LyricsComponent) finishSwitchFade() {
 	l.switchFadeActive = false
 	l.switchFadeStart = time.Time{}
+	if l.TransitionImage != nil {
+		l.TransitionImage.Deallocate()
+		l.TransitionImage = nil
+	}
 }
 
 func (l *LyricsComponent) ensureTransitionImage() {
@@ -217,7 +224,7 @@ func (l *LyricsComponent) snapshotCurrentFrame() bool {
 	if l.LyricsControl != nil {
 		l.LyricsControl.Dispose()
 		l.LyricsControl = nil
-		releaseLyricsMemory()
+		releaseLyricsMemory(false)
 	}
 
 	control, err := lyrics.New(ls, l.Width, l.FontManager, l.FontRequest, l.FontSize, l.FD)
@@ -239,7 +246,7 @@ func (l *LyricsComponent) SetLyrics(ls []ttml.LyricLine) *LyricsComponent {
 	if l.LyricsControl != nil {
 		l.LyricsControl.Dispose()
 		l.LyricsControl = nil
-		releaseLyricsMemory()
+		releaseLyricsMemory(false)
 	}
 
 	// 只有在尺寸变化时才重新创建图像
@@ -553,6 +560,6 @@ func (l *LyricsComponent) Dispose() {
 	l.staticLayerReady = false
 	l.finishSwitchFade()
 	if released {
-		releaseLyricsMemory()
+		releaseLyricsMemory(true)
 	}
 }

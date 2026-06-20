@@ -39,6 +39,38 @@ func TestApplyRefHorizontalLayoutAddsDuetAvoidance(t *testing.T) {
 	}
 }
 
+func TestApplyRefHorizontalLayoutAlignsBackgroundPaddingWithMainLine(t *testing.T) {
+	mainLine := NewLine(0, time.Second, false, false, "", nil, ft.FontRequest{}, 48)
+	bgLine := NewLine(0, time.Second, false, true, "", nil, ft.FontRequest{}, 32)
+	applyRefHorizontalLayout(mainLine, 1000, false)
+	applyRefHorizontalLayout(bgLine, 1000, false)
+
+	if bgLine.EffectivePaddingLeft() != mainLine.EffectivePaddingLeft() {
+		t.Fatalf("background left padding = %v, want main padding %v", bgLine.EffectivePaddingLeft(), mainLine.EffectivePaddingLeft())
+	}
+	if bgLine.EffectivePaddingRight() != mainLine.EffectivePaddingRight() {
+		t.Fatalf("background right padding = %v, want main padding %v", bgLine.EffectivePaddingRight(), mainLine.EffectivePaddingRight())
+	}
+}
+
+func TestApplyRefHorizontalLayoutAlignsBackgroundDuetAvoidance(t *testing.T) {
+	mainLine := NewLine(0, time.Second, false, false, "", nil, ft.FontRequest{}, 48)
+	bgLine := NewLine(0, time.Second, false, true, "", nil, ft.FontRequest{}, 32)
+	duetLine := NewLine(0, time.Second, true, false, "", nil, ft.FontRequest{}, 48)
+	bgDuetLine := NewLine(0, time.Second, true, true, "", nil, ft.FontRequest{}, 32)
+	applyRefHorizontalLayout(mainLine, 1000, true)
+	applyRefHorizontalLayout(bgLine, 1000, true)
+	applyRefHorizontalLayout(duetLine, 1000, true)
+	applyRefHorizontalLayout(bgDuetLine, 1000, true)
+
+	if bgLine.EffectivePaddingRight() != mainLine.EffectivePaddingRight() {
+		t.Fatalf("background right padding = %v, want main padding %v", bgLine.EffectivePaddingRight(), mainLine.EffectivePaddingRight())
+	}
+	if bgDuetLine.EffectivePaddingLeft() != duetLine.EffectivePaddingLeft() {
+		t.Fatalf("background duet left padding = %v, want duet padding %v", bgDuetLine.EffectivePaddingLeft(), duetLine.EffectivePaddingLeft())
+	}
+}
+
 func TestLineBasePaddingIsClampedForLargeFonts(t *testing.T) {
 	if got := lineBasePadding(80, 1600); got != 40 {
 		t.Fatalf("padding = %v, want clamped 40", got)

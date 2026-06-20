@@ -350,7 +350,7 @@ func NewTween(id string, duration, delay time.Duration, loops int, from, to floa
 func (t *Tween) ID() string { return t.id }
 
 func (t *Tween) Start() {
-	if t.started {
+	if t.started || t.done {
 		return
 	}
 	t.elapsed = 0
@@ -406,6 +406,10 @@ func (t *Tween) Cancel() {
 	}
 	t.done = true
 	t.playing = false
+}
+
+func (t *Tween) Done() bool {
+	return t == nil || t.done
 }
 
 func (t *Tween) Stop(finalize bool) {
@@ -484,7 +488,7 @@ func NewKeyframeAnimation(
 func (a *KeyframeAnimation) ID() string { return a.id }
 
 func (a *KeyframeAnimation) Start() {
-	if a.started {
+	if a.started || a.done {
 		return
 	}
 	a.elapsed = 0
@@ -584,6 +588,10 @@ func (a *KeyframeAnimation) Cancel() {
 	a.playing = false
 }
 
+func (a *KeyframeAnimation) Done() bool {
+	return a == nil || a.done
+}
+
 func (a *KeyframeAnimation) Stop(finalize bool) {
 	if a.done || len(a.keyframes) == 0 { // 增加 kfs 长度检查
 		return
@@ -629,7 +637,7 @@ func (s *Sequence) ID() string { return s.id }
 
 // Start 开始播放序列中的第一个动画
 func (s *Sequence) Start() {
-	if s.playing {
+	if s.playing || s.done {
 		return
 	}
 	s.playing = true
@@ -700,6 +708,10 @@ func (s *Sequence) Cancel() {
 	s.playing = false
 }
 
+func (s *Sequence) Done() bool {
+	return s == nil || s.done
+}
+
 // Stop 停止序列，可以选择是否完成最后一个动画
 func (s *Sequence) Stop(finalize bool) {
 	if s.done {
@@ -736,8 +748,21 @@ func NewManager(useFixedStep bool) *Manager {
 	}
 }
 
+func animationDone(a Animation) bool {
+	if a == nil {
+		return true
+	}
+	if done, ok := a.(interface{ Done() bool }); ok {
+		return done.Done()
+	}
+	return false
+}
+
 // Add 添加动画
 func (m *Manager) Add(anim Animation) {
+	if anim == nil || animationDone(anim) {
+		return
+	}
 	m.pending = append(m.pending, anim)
 }
 
@@ -765,8 +790,17 @@ func (m *Manager) Cancel(id string) {
 func (m *Manager) Update(dt time.Duration) {
 	// 启动 pending 动画
 	for _, a := range m.pending {
+		if animationDone(a) {
+			continue
+		}
 		a.Start()
+		if animationDone(a) {
+			continue
+		}
 		m.active[a.ID()] = a
+	}
+	for i := range m.pending {
+		m.pending[i] = nil
 	}
 	m.pending = m.pending[:0]
 

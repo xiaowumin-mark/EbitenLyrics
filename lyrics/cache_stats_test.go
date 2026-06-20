@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/hajimehoshi/ebiten/v2"
+	"github.com/xiaowumin-mark/EbitenLyrics/anim"
 	ft "github.com/xiaowumin-mark/EbitenLyrics/font"
 )
 
@@ -55,6 +56,68 @@ func TestSharedImageCacheStatsTracksRefs(t *testing.T) {
 	}
 }
 
+func TestSyllableImageDrawRehydratesResourcesBeforeDrawing(t *testing.T) {
+	PurgeSharedImageCache()
+	t.Cleanup(PurgeSharedImageCache)
+
+	manager := ft.NewFontManager(16)
+	req := ft.DefaultRequest()
+	syllable, err := CreateSyllableImage(
+		"draw",
+		manager,
+		req,
+		32,
+		0.6,
+		color.RGBA{255, 255, 255, 255},
+		color.RGBA{255, 255, 255, 60},
+	)
+	if err != nil {
+		t.Fatalf("create syllable image: %v", err)
+	}
+	if !syllable.ensureResources() {
+		t.Fatal("expected initial resources")
+	}
+	syllable.Dispose()
+	if syllable.TextMask != nil || syllable.GradientImage != nil || syllable.HighlightGradientImage != nil {
+		t.Fatal("dispose should clear local resource handles")
+	}
+
+	width := safeImageLength(syllable.Width)
+	height := safeImageLength(syllable.Height)
+	dst := ebiten.NewImage(width, height)
+	pos := NewPosition(0, 0, syllable.Width, syllable.Height)
+	syllable.Draw(dst, syllable.GetOffset(), 1, &pos)
+
+	if syllable.TextMask == nil || syllable.GradientImage == nil {
+		t.Fatal("draw should restore base resource handles")
+	}
+	if syllable.HighlightGradientImage != nil {
+		t.Fatal("base draw should not create highlight gradient")
+	}
+	syllable.DrawHighlight(dst, syllable.GetOffset(), 1, &pos)
+	if syllable.HighlightGradientImage == nil {
+		t.Fatal("highlight draw should restore highlight resource handle")
+	}
+}
+
+func TestSyllableScratchPoolHasRetainBudget(t *testing.T) {
+	PurgeSharedImageCache()
+	t.Cleanup(PurgeSharedImageCache)
+
+	for i := 0; i < scratchMaxRetained*4; i++ {
+		img := syllableScratchImages.acquire(17+i*37, 23+i%5)
+		syllableScratchImages.release(img)
+	}
+
+	stats := SharedImageCacheStats()
+	if stats.ScratchImages > scratchMaxRetained {
+		t.Fatalf("scratch images = %d, want <= %d", stats.ScratchImages, scratchMaxRetained)
+	}
+	if stats.ScratchPixels > scratchMaxRetainedPixel {
+		t.Fatalf("scratch pixels = %d, want <= %d", stats.ScratchPixels, scratchMaxRetainedPixel)
+	}
+}
+
 func TestRenderCacheStatsIncludesLineAndBottomCaches(t *testing.T) {
 	PurgeSharedImageCache()
 	t.Cleanup(PurgeSharedImageCache)
@@ -87,4 +150,200 @@ func TestRenderCacheStatsIncludesLineAndBottomCaches(t *testing.T) {
 
 	line.Dispose()
 	lyrics.Bottom.Dispose()
+}
+
+func TestHideLineKeepsRenderableResources(t *testing.T) {
+	PurgeSharedImageCache()
+	t.Cleanup(PurgeSharedImageCache)
+
+	manager := ft.NewFontManager(16)
+	req := ft.DefaultRequest()
+	line := NewLine(0, time.Second, false, false, "", manager, req, 32)
+	syllable, err := NewSyllable(
+		"cache",
+		0,
+		time.Second,
+		manager,
+		req,
+		32,
+		0.6,
+		color.RGBA{255, 255, 255, 255},
+		color.RGBA{255, 255, 255, 60},
+		false,
+	)
+	if err != nil {
+		t.Fatalf("create syllable: %v", err)
+	}
+	line.SetSyllables([]*LineSyllable{syllable})
+	line.GetPosition().SetW(200)
+	line.GetPosition().SetH(80)
+	line.Render()
+	line.BlurImage = ebiten.NewImage(4, 4)
+	if line.Image == nil {
+		t.Fatal("render should create a line image")
+	}
+	if stats := SharedImageCacheStats(); stats.TextMaskEntries == 0 || stats.GradientEntries == 0 {
+		t.Fatalf("resources were not created: %+v", stats)
+	}
+
+	lineRendererLayer.HideLine(line)
+	if line.isShow {
+		t.Fatal("hidden line should not stay drawable")
+	}
+	if line.Image == nil {
+		t.Fatal("soft hide should keep the line image")
+	}
+	if line.BlurImage != nil {
+		t.Fatal("soft hide should release derived blur image")
+	}
+	if stats := SharedImageCacheStats(); stats.TextMaskEntries == 0 || stats.GradientEntries == 0 {
+		t.Fatalf("soft hide should keep shared resources: %+v", stats)
+	}
+	line.Render()
+	if stats := SharedImageCacheStats(); stats.TextMaskEntries != 1 || stats.TextMaskRefs != 1 {
+		t.Fatalf("rerender after soft hide should reuse shared text mask: %+v", stats)
+	}
+
+	line.Dispose()
+	if line.Image != nil {
+		t.Fatal("hard dispose should release the line image")
+	}
+	if stats := SharedImageCacheStats(); stats.TextMaskEntries != 0 || stats.GradientEntries != 0 {
+		t.Fatalf("hard dispose should release shared resources: %+v", stats)
+	}
+}
+
+func TestRecreateLineImageReusesSameSizeBitmap(t *testing.T) {
+	line := NewLine(0, time.Second, false, false, "", nil, ft.FontRequest{}, 32)
+	line.isShow = true
+	line.GetPosition().SetW(120)
+	line.GetPosition().SetH(48)
+
+	lineRendererLayer.RecreateLineImage(line)
+	first := line.Image
+	if first == nil {
+		t.Fatal("first recreate should allocate an image")
+	}
+
+	lineRendererLayer.RecreateLineImage(line)
+	if line.Image != first {
+		t.Fatal("same-size recreate should reuse the existing image")
+	}
+
+	line.GetPosition().SetH(64)
+	lineRendererLayer.RecreateLineImage(line)
+	if line.Image == nil {
+		t.Fatal("resized recreate should leave an image")
+	}
+	if line.Image == first {
+		t.Fatal("different-size recreate should allocate a new image")
+	}
+	line.Dispose()
+}
+
+func TestResizeVisibleLineCanRenderMainLyricsAfterResourceRelease(t *testing.T) {
+	PurgeSharedImageCache()
+	t.Cleanup(PurgeSharedImageCache)
+
+	manager := ft.NewFontManager(16)
+	req := ft.DefaultRequest()
+	line := NewLine(0, time.Second, false, false, "translation", manager, req, 32)
+	line.HasDuetInSong = false
+	line.isShow = true
+	line.setStatus(LineStatusPreviewStatic)
+	line.GetPosition().SetAlpha(1)
+	applyRefHorizontalLayout(line, 500, false)
+	syllable, err := NewSyllable(
+		"main",
+		0,
+		time.Second,
+		manager,
+		req,
+		32,
+		0.6,
+		color.RGBA{255, 255, 255, 255},
+		color.RGBA{255, 255, 255, 60},
+		false,
+	)
+	if err != nil {
+		t.Fatalf("create syllable: %v", err)
+	}
+	line.SetSyllables([]*LineSyllable{syllable})
+	line.Layout()
+	line.Render()
+	if line.Image == nil {
+		t.Fatal("initial render should create line image")
+	}
+	if syllable.Elements[0].SyllableImage.GradientImage == nil {
+		t.Fatal("initial render should create main lyric resources")
+	}
+
+	line.Resize(700)
+	if line.Image == nil {
+		t.Fatal("resize should recreate visible line image")
+	}
+	line.Render()
+	if line.Image == nil {
+		t.Fatal("render after resize should keep line image")
+	}
+	if syllable.Elements[0].SyllableImage.TextMask == nil ||
+		syllable.Elements[0].SyllableImage.GradientImage == nil ||
+		syllable.Elements[0].SyllableImage.HighlightGradientImage == nil {
+		t.Fatal("render after resize should restore main lyric resources")
+	}
+	line.Dispose()
+}
+
+func TestRenderLineKeepsCleanPreviewBitmap(t *testing.T) {
+	line := NewLine(0, time.Second, false, false, "", nil, ft.FontRequest{}, 32)
+	line.isShow = true
+	line.setStatus(LineStatusPreviewStatic)
+	line.GetPosition().SetAlpha(1)
+	line.GetPosition().SetW(4)
+	line.GetPosition().SetH(4)
+	line.Image = ebiten.NewImage(4, 4)
+	line.Image.Fill(color.RGBA{12, 34, 56, 255})
+	line.imageDirty = false
+	image := line.Image
+
+	lineRendererLayer.RenderLine(line)
+	if line.Image != image {
+		t.Fatal("clean preview bitmap should be reused")
+	}
+	if line.imageDirty {
+		t.Fatal("clean preview bitmap should stay clean")
+	}
+	line.Dispose()
+}
+
+func TestHideLineWithManagerCancelsPendingAnimations(t *testing.T) {
+	manager := anim.NewManager(false)
+	line := NewLine(0, time.Second, false, false, "", nil, ft.FontRequest{}, 32)
+	line.ScaleAnimate = anim.NewTween("scale", time.Second, 0, 1, 0, 1, anim.Linear, func(float64) {}, func() {})
+	manager.Add(line.ScaleAnimate)
+
+	lineRendererLayer.HideLineWithManager(line, manager)
+	manager.Update(time.Second / 60)
+	if line.ScaleAnimate != nil {
+		t.Fatal("soft hide should clear the line animation reference")
+	}
+}
+
+func TestTickHiddenResourcePruneReleasesIdleCache(t *testing.T) {
+	line := NewLine(0, time.Second, false, false, "", nil, ft.FontRequest{}, 32)
+	line.Image = ebiten.NewImage(4, 4)
+	line.lastVisibleAt = 0
+	line.isShow = false
+	lyrics := &Lyrics{
+		Lines:       []*Line{line},
+		anchorIndex: 0,
+		Timeline: TimelineState{
+			CurrentTime: hiddenLineRetainIdle + time.Second,
+		},
+	}
+
+	lineRendererLayer.TickHiddenResourcePrune(lyrics, hiddenLinePruneInterval)
+	if line.Image != nil {
+		t.Fatal("idle hidden resource prune should hard-release the line image")
+	}
 }

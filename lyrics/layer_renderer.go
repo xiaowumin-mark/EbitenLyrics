@@ -5,10 +5,20 @@ package lyrics
 
 import (
 	"math"
+	"sort"
+	"time"
 
 	"github.com/hajimehoshi/ebiten/v2"
+	"github.com/xiaowumin-mark/EbitenLyrics/anim"
 	"github.com/xiaowumin-mark/EbitenLyrics/filters"
 	"github.com/xiaowumin-mark/EbitenLyrics/lp"
+)
+
+const (
+	hiddenLineRetainDistance = 16
+	hiddenLineRetainIdle     = 5 * time.Second
+	hiddenLineRetainBudget   = 32
+	hiddenLinePruneInterval  = time.Second
 )
 
 func (l *Line) recreateLineImage() {
@@ -43,18 +53,30 @@ func (RendererLayer) RecreateLineImage(l *Line) {
 	if l == nil {
 		return
 	}
+	if !l.isShow {
+		return
+	}
+	targetW := safeImageLength(l.GetPosition().GetW())
+	targetH := safeImageLength(l.GetPosition().GetH())
+	if targetW < 1 {
+		targetW = 1
+	}
+	if targetH < 1 {
+		targetH = 1
+	}
 	if l.Image != nil {
+		currentW, currentH := l.Image.Size()
+		if currentW == targetW && currentH == targetH {
+			l.clearBlurCache()
+			l.Image.Clear()
+			l.imageDirty = true
+			return
+		}
 		l.clearBlurCache()
 		l.Image.Deallocate()
 		l.Image = nil
 	}
-	if !l.isShow {
-		return
-	}
-	l.Image = ebiten.NewImage(
-		safeImageLength(l.GetPosition().GetW()),
-		safeImageLength(l.GetPosition().GetH()),
-	)
+	l.Image = ebiten.NewImage(targetW, targetH)
 	l.imageDirty = true
 }
 
@@ -170,6 +192,17 @@ func (RendererLayer) DisposeLine(l *Line) {
 	if l == nil {
 		return
 	}
+	lineRendererLayer.ReleaseLineResources(l)
+	l.isShow = false
+	l.lastRenderRank = -1
+	l.imageDirty = true
+	l.setStatus(LineStatusHidden)
+}
+
+func (RendererLayer) ReleaseLineResources(l *Line) {
+	if l == nil {
+		return
+	}
 	for _, syllable := range l.Syllables {
 		if syllable != nil {
 			syllable.Dispose()
@@ -177,7 +210,7 @@ func (RendererLayer) DisposeLine(l *Line) {
 	}
 	for _, bgline := range l.BackgroundLines {
 		if bgline != nil {
-			lineRendererLayer.DisposeLine(bgline)
+			lineRendererLayer.ReleaseLineResources(bgline)
 		}
 	}
 	if l.TranslateImage != nil {
@@ -190,10 +223,157 @@ func (RendererLayer) DisposeLine(l *Line) {
 		l.Image = nil
 	}
 	l.clearBlurCache()
-	l.isShow = false
 	l.imageDirty = true
-	l.setStatus(LineStatusHidden)
+	l.invalidateOffsetMetrics()
 }
+
+func (RendererLayer) HideLine(l *Line) {
+	lineRendererLayer.HideLineWithManager(l, nil)
+}
+
+func (RendererLayer) HideLineWithManager(l *Line, manager *anim.Manager) {
+	if l == nil {
+		return
+	}
+	for _, bgline := range l.BackgroundLines {
+		if bgline != nil {
+			lineRendererLayer.HideLineWithManager(bgline, manager)
+		}
+	}
+	wasRealtime := l.Status.RequiresRealtimeRender()
+	lineAnimationLayer.disposeLineAnimationsWithManager(l, manager)
+	if wasRealtime {
+		lineAnimationLayer.resetLinePreviewContent(l)
+	}
+	l.clearBlurCache()
+	l.isShow = false
+	l.lastRenderRank = -1
+	if wasRealtime {
+		l.setStatus(LineStatusPreviewStatic)
+	}
+}
+
+type hiddenLineResourceCandidate struct {
+	index    int
+	line     *Line
+	distance int
+	idle     time.Duration
+}
+
+func (RendererLayer) ReclaimHiddenLineResources(l *Lyrics, renderSet map[int]struct{}, anchorIndex int) {
+	if l == nil || len(l.Lines) == 0 {
+		return
+	}
+	now := l.Timeline.CurrentTime
+	candidates := make([]hiddenLineResourceCandidate, 0)
+	for i, line := range l.Lines {
+		if line == nil {
+			continue
+		}
+		if _, ok := renderSet[i]; ok {
+			continue
+		}
+		if !lineHasRetainedResources(line) {
+			continue
+		}
+		distance := absInt(i - anchorIndex)
+		idle := now - line.lastVisibleAt
+		if idle < 0 {
+			idle = 0
+		}
+		if distance > hiddenLineRetainDistance || idle > hiddenLineRetainIdle {
+			lineRendererLayer.DisposeLine(line)
+			continue
+		}
+		candidates = append(candidates, hiddenLineResourceCandidate{
+			index:    i,
+			line:     line,
+			distance: distance,
+			idle:     idle,
+		})
+	}
+	if len(candidates) <= hiddenLineRetainBudget {
+		return
+	}
+	sort.Slice(candidates, func(i, j int) bool {
+		if candidates[i].distance != candidates[j].distance {
+			return candidates[i].distance < candidates[j].distance
+		}
+		if candidates[i].idle != candidates[j].idle {
+			return candidates[i].idle < candidates[j].idle
+		}
+		return candidates[i].index < candidates[j].index
+	})
+	for _, candidate := range candidates[hiddenLineRetainBudget:] {
+		lineRendererLayer.DisposeLine(candidate.line)
+	}
+}
+
+func (RendererLayer) TickHiddenResourcePrune(l *Lyrics, dt time.Duration) {
+	if l == nil || dt <= 0 {
+		return
+	}
+	l.hiddenResourcePruneElapsed += dt
+	if l.hiddenResourcePruneElapsed < hiddenLinePruneInterval {
+		return
+	}
+	l.hiddenResourcePruneElapsed = 0
+	renderSet := make(map[int]struct{}, len(l.renderIndex))
+	for _, index := range l.renderIndex {
+		renderSet[index] = struct{}{}
+	}
+	anchorIndex := l.anchorIndex
+	if anchorIndex < 0 {
+		anchorIndex = l.Timeline.ScrollToIndex
+	}
+	if anchorIndex < 0 {
+		anchorIndex = 0
+	}
+	lineRendererLayer.ReclaimHiddenLineResources(l, renderSet, anchorIndex)
+}
+
+func lineHasRetainedResources(l *Line) bool {
+	if l == nil {
+		return false
+	}
+	if l.Image != nil || l.BlurImage != nil || l.TranslateImage != nil {
+		return true
+	}
+	for _, syllable := range l.Syllables {
+		if syllableHasRetainedResources(syllable) {
+			return true
+		}
+	}
+	for _, bgline := range l.BackgroundLines {
+		if lineHasRetainedResources(bgline) {
+			return true
+		}
+	}
+	return false
+}
+
+func syllableHasRetainedResources(s *LineSyllable) bool {
+	if s == nil {
+		return false
+	}
+	for _, element := range s.Elements {
+		if element == nil {
+			continue
+		}
+		if element.BackgroundBlurText != nil {
+			return true
+		}
+		if syllableImageHasRetainedResources(element.SyllableImage) {
+			return true
+		}
+	}
+	return false
+}
+
+func syllableImageHasRetainedResources(s *SyllableImage) bool {
+	return s != nil && (s.TextMask != nil || s.GradientImage != nil || s.HighlightGradientImage != nil)
+}
+
 func (RendererLayer) RenderLine(l *Line) {
 	if l == nil {
 		return
@@ -202,11 +382,10 @@ func (RendererLayer) RenderLine(l *Line) {
 		for _, bgline := range l.BackgroundLines {
 			lineRendererLayer.RenderLine(bgline)
 		}
-		l.markImageDirty()
 		if l.Image == nil {
 			lineRendererLayer.RecreateLineImage(l)
 		}
-		if l.Status.UsesPreviewBitmap() && l.Image != nil && l.GetPosition().GetAlpha() > 0 {
+		if l.Status.UsesPreviewBitmap() && l.Image != nil && l.GetPosition().GetAlpha() > 0 && l.imageDirty {
 			lineRendererLayer.redrawLineImage(l)
 		}
 		return
@@ -216,13 +395,12 @@ func (RendererLayer) RenderLine(l *Line) {
 	if l.Status == LineStatusHidden {
 		l.setStatus(LineStatusPreviewStatic)
 	}
-	for _, syllable := range l.Syllables {
-		syllable.Redraw()
-	}
 	for _, bgline := range l.BackgroundLines {
 		lineRendererLayer.RenderLine(bgline)
 	}
-	lineLayoutLayer.GenerateLineTranslateImage(l)
+	if l.TranslateImage == nil && l.TranslatedText != "" {
+		lineLayoutLayer.GenerateLineTranslateImage(l)
+	}
 	lineRendererLayer.RecreateLineImage(l)
 	if l.Status.UsesPreviewBitmap() && l.Image != nil && l.GetPosition().GetAlpha() > 0 {
 		lineRendererLayer.redrawLineImage(l)

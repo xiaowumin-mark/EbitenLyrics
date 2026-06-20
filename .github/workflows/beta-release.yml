@@ -1,0 +1,197 @@
+name: Beta Release
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: beta-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Install Linux build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libasound2-dev libgl1-mesa-dev xorg-dev
+
+      - name: Verify modules
+        run: go mod verify
+
+      - name: Run tests
+        run: go test ./...
+
+  build:
+    name: Build ${{ matrix.target }}
+    needs: test
+    runs-on: ${{ matrix.runner }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: windows-x86
+            runner: windows-latest
+            goos: windows
+            goarch: "386"
+            cgo: "0"
+            binary: EbitenLyrics.exe
+            archive: EbitenLyrics-windows-x86.zip
+            package: zip
+          - target: windows-x64
+            runner: windows-latest
+            goos: windows
+            goarch: amd64
+            cgo: "0"
+            binary: EbitenLyrics.exe
+            archive: EbitenLyrics-windows-x64.zip
+            package: zip
+          - target: windows-arm64
+            runner: windows-latest
+            goos: windows
+            goarch: arm64
+            cgo: "0"
+            binary: EbitenLyrics.exe
+            archive: EbitenLyrics-windows-arm64.zip
+            package: zip
+          - target: linux-x64
+            runner: ubuntu-24.04
+            goos: linux
+            goarch: amd64
+            cgo: "1"
+            binary: EbitenLyrics
+            archive: EbitenLyrics-linux-x64.tar.gz
+            package: tar
+          - target: linux-arm64
+            runner: ubuntu-24.04-arm
+            goos: linux
+            goarch: arm64
+            cgo: "1"
+            binary: EbitenLyrics
+            archive: EbitenLyrics-linux-arm64.tar.gz
+            package: tar
+          - target: macos-x64
+            runner: macos-15-intel
+            goos: darwin
+            goarch: amd64
+            cgo: "1"
+            binary: EbitenLyrics
+            archive: EbitenLyrics-macos-x64.tar.gz
+            package: tar
+          - target: macos-arm64
+            runner: macos-15
+            goos: darwin
+            goarch: arm64
+            cgo: "1"
+            binary: EbitenLyrics
+            archive: EbitenLyrics-macos-arm64.tar.gz
+            package: tar
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Install Linux build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libasound2-dev libgl1-mesa-dev xorg-dev
+
+      - name: Build binary
+        shell: bash
+        env:
+          CGO_ENABLED: ${{ matrix.cgo }}
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: |
+          set -euo pipefail
+          mkdir -p "build/${{ matrix.target }}"
+          go build -trimpath -ldflags="-s -w" -o "build/${{ matrix.target }}/${{ matrix.binary }}" .
+          cp LICENSE README.md README_zh.md "build/${{ matrix.target }}/"
+
+      - name: Package ZIP
+        if: matrix.package == 'zip'
+        shell: pwsh
+        run: |
+          Compress-Archive -Path "build/${{ matrix.target }}/*" -DestinationPath "${{ matrix.archive }}" -Force
+
+      - name: Package tar.gz
+        if: matrix.package == 'tar'
+        shell: bash
+        run: |
+          tar -czf "${{ matrix.archive }}" -C "build/${{ matrix.target }}" .
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.archive }}
+          path: ${{ matrix.archive }}
+          if-no-files-found: error
+
+  release:
+    name: Publish beta release
+    needs: build
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Create beta release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          COMMIT_SHA: ${{ github.sha }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          short_sha="${COMMIT_SHA::7}"
+          tag="beta-${short_sha}"
+
+          gh release delete "$tag" --yes 2>/dev/null || true
+          git push origin ":refs/tags/$tag" 2>/dev/null || true
+          git tag -f "$tag" "$COMMIT_SHA"
+          git push -f origin "refs/tags/$tag"
+
+          cat > release-notes.md <<EOF
+          Beta build for commit ${COMMIT_SHA}.
+
+          Workflow run: ${RUN_URL}
+          EOF
+
+          gh release create "$tag" dist/* \
+            --title "Beta ${short_sha}" \
+            --notes-file release-notes.md \
+            --prerelease \
+            --target "$COMMIT_SHA"

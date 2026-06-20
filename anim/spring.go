@@ -15,10 +15,24 @@ type SpringParams struct {
 type Spring struct {
 	currentPosition float64
 	targetPosition  float64
-	velocity        float64
+	currentTime     float64
 	params          SpringParams
+	solver          springSolver
 	queueParams     *queuedSpringParams
 	queuePosition   *queuedSpringPosition
+}
+
+type springSolver struct {
+	from     float64
+	velocity float64
+	to       float64
+	params   SpringParams
+	constant bool
+	critical bool
+	w        float64
+	leftover float64
+	dfm      float64
+	dm       float64
 }
 
 type queuedSpringParams struct {
@@ -33,11 +47,13 @@ type queuedSpringPosition struct {
 
 func NewSpring(position float64, params SpringParams) *Spring {
 	params = normalizeSpringParams(params)
-	return &Spring{
+	s := &Spring{
 		currentPosition: position,
 		targetPosition:  position,
 		params:          params,
 	}
+	s.solver = newConstantSpringSolver(position, params)
+	return s
 }
 
 func normalizeSpringParams(params SpringParams) SpringParams {
@@ -59,7 +75,8 @@ func (s *Spring) SetPosition(position float64) {
 	}
 	s.currentPosition = position
 	s.targetPosition = position
-	s.velocity = 0
+	s.currentTime = 0
+	s.solver = newConstantSpringSolver(position, s.params)
 	s.queueParams = nil
 	s.queuePosition = nil
 }
@@ -73,7 +90,10 @@ func (s *Spring) SetTargetPosition(position float64, delay ...time.Duration) {
 		return
 	}
 	s.queuePosition = nil
+	currentVelocity := s.Velocity()
 	s.targetPosition = position
+	s.currentTime = 0
+	s.solver = newSpringSolver(s.currentPosition, currentVelocity, s.targetPosition, s.params)
 }
 
 func (s *Spring) UpdateParams(params SpringParams, delay ...time.Duration) {
@@ -97,6 +117,9 @@ func (s *Spring) UpdateParams(params SpringParams, delay ...time.Duration) {
 	}
 	current.Soft = params.Soft
 	s.params = normalizeSpringParams(current)
+	currentVelocity := s.Velocity()
+	s.currentTime = 0
+	s.solver = newSpringSolver(s.currentPosition, currentVelocity, s.targetPosition, s.params)
 }
 
 func (s *Spring) Update(dt time.Duration) {
@@ -104,19 +127,13 @@ func (s *Spring) Update(dt time.Duration) {
 		return
 	}
 	seconds := dt.Seconds()
-	if seconds > 0.05 {
-		seconds = 0.05
-	}
-	step := time.Duration(seconds * float64(time.Second))
-	s.applyQueued(step)
-	params := normalizeSpringParams(s.params)
-	displacement := s.currentPosition - s.targetPosition
-	acceleration := (-params.Stiffness*displacement - params.Damping*s.velocity) / params.Mass
-	s.velocity += acceleration * seconds
-	s.currentPosition += s.velocity * seconds
+	s.currentTime += seconds
+	s.currentPosition = s.solver.position(s.currentTime)
+	s.applyQueued(dt)
 	if s.Arrived() {
 		s.currentPosition = s.targetPosition
-		s.velocity = 0
+		s.currentTime = 0
+		s.solver = newConstantSpringSolver(s.targetPosition, s.params)
 	}
 }
 
@@ -125,16 +142,24 @@ func (s *Spring) applyQueued(dt time.Duration) {
 		s.queueParams.delay -= dt
 		if s.queueParams.delay <= 0 {
 			params := s.queueParams.params
+			overrun := -s.queueParams.delay
 			s.queueParams = nil
 			s.UpdateParams(params)
+			if overrun > 0 {
+				s.Update(overrun)
+			}
 		}
 	}
 	if s.queuePosition != nil {
 		s.queuePosition.delay -= dt
 		if s.queuePosition.delay <= 0 {
 			position := s.queuePosition.position
+			overrun := -s.queuePosition.delay
 			s.queuePosition = nil
 			s.SetTargetPosition(position)
+			if overrun > 0 {
+				s.Update(overrun)
+			}
 		}
 	}
 }
@@ -157,7 +182,7 @@ func (s *Spring) Velocity() float64 {
 	if s == nil {
 		return 0
 	}
-	return s.velocity
+	return s.solver.velocityAt(s.currentTime)
 }
 
 func (s *Spring) Params() SpringParams {
@@ -171,5 +196,84 @@ func (s *Spring) Arrived() bool {
 	if s == nil {
 		return true
 	}
-	return math.Abs(s.targetPosition-s.currentPosition) < 0.01 && math.Abs(s.velocity) < 0.01 && s.queueParams == nil && s.queuePosition == nil
+	return math.Abs(s.targetPosition-s.currentPosition) < 0.01 && math.Abs(s.Velocity()) < 0.01 && math.Abs(s.acceleration()) < 0.01 && s.queueParams == nil && s.queuePosition == nil
+}
+
+func (s *Spring) acceleration() float64 {
+	if s == nil {
+		return 0
+	}
+	return s.solver.accelerationAt(s.currentTime)
+}
+
+func newConstantSpringSolver(position float64, params SpringParams) springSolver {
+	return springSolver{from: position, to: position, params: normalizeSpringParams(params), constant: true}
+}
+
+func newSpringSolver(from, velocity, to float64, params SpringParams) springSolver {
+	params = normalizeSpringParams(params)
+	delta := to - from
+	critical := params.Soft || 1.0 <= params.Damping/(2.0*math.Sqrt(params.Stiffness*params.Mass))
+	solver := springSolver{from: from, velocity: velocity, to: to, params: params, critical: critical}
+	if critical {
+		w := -math.Sqrt(params.Stiffness / params.Mass)
+		solver.w = w
+		solver.leftover = -w*delta - velocity
+		return solver
+	}
+	dampingFrequency := math.Sqrt(4.0*params.Mass*params.Stiffness - params.Damping*params.Damping)
+	solver.leftover = (params.Damping*delta - 2.0*params.Mass*velocity) / dampingFrequency
+	solver.dfm = (0.5 * dampingFrequency) / params.Mass
+	solver.dm = -(0.5 * params.Damping) / params.Mass
+	return solver
+}
+
+func (s springSolver) position(t float64) float64 {
+	if s.constant {
+		return s.to
+	}
+	delta := s.to - s.from
+	if s.critical {
+		term := delta + t*s.leftover
+		return s.to - term*math.Exp(t*s.w)
+	}
+	a := s.oscillation(t, delta)
+	return s.to - a*math.Exp(t*s.dm)
+}
+
+func (s springSolver) velocityAt(t float64) float64 {
+	if s.constant {
+		return 0
+	}
+	delta := s.to - s.from
+	if s.critical {
+		term := delta + t*s.leftover
+		return -(s.leftover + s.w*term) * math.Exp(t*s.w)
+	}
+	a := s.oscillation(t, delta)
+	ap := s.oscillationDerivative(t, delta)
+	return -(ap + s.dm*a) * math.Exp(t*s.dm)
+}
+
+func (s springSolver) accelerationAt(t float64) float64 {
+	if s.constant {
+		return 0
+	}
+	delta := s.to - s.from
+	if s.critical {
+		term := delta + t*s.leftover
+		return -(2*s.w*s.leftover + s.w*s.w*term) * math.Exp(t*s.w)
+	}
+	a := s.oscillation(t, delta)
+	tap := s.oscillationDerivative(t, delta)
+	app := -s.dfm * s.dfm * a
+	return -(app + 2*s.dm*tap + s.dm*s.dm*a) * math.Exp(t*s.dm)
+}
+
+func (s springSolver) oscillation(t, delta float64) float64 {
+	return math.Cos(t*s.dfm)*delta + math.Sin(t*s.dfm)*s.leftover
+}
+
+func (s springSolver) oscillationDerivative(t, delta float64) float64 {
+	return -s.dfm*math.Sin(t*s.dfm)*delta + s.dfm*math.Cos(t*s.dfm)*s.leftover
 }

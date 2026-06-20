@@ -12,6 +12,7 @@ import (
 
 	"github.com/xiaowumin-mark/EbitenLyrics/anim"
 	f "github.com/xiaowumin-mark/EbitenLyrics/font"
+	"github.com/xiaowumin-mark/EbitenLyrics/localaudio"
 	"github.com/xiaowumin-mark/EbitenLyrics/lp"
 	"github.com/xiaowumin-mark/EbitenLyrics/pages"
 	"github.com/xiaowumin-mark/EbitenLyrics/router"
@@ -109,11 +110,14 @@ func main() {
 	//ebiten.SetWindowSize(lp.LPInt(1125/1.5), lp.LPInt(2436/1.5))
 
 	game.animMgr = anim.NewManager(false)
+	localAudio := localaudio.Start()
+	defer localAudio.Close()
 
 	router.Add("home", &pages.Home{
 		FontManager:    game.fontManager,
 		FontRequest:    game.fontRequest,
 		AnimateManager: game.animMgr,
+		LocalAudio:     localAudio,
 	})
 	router.Add("game", &pages.Game{
 		FontManager:    game.fontManager,

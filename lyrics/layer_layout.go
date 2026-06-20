@@ -197,6 +197,7 @@ func (LayoutLayer) SetLineFont(l *Line, fontManager *ft.FontManager, req ft.Font
 	if l == nil {
 		return
 	}
+	lineRendererLayer.ReleaseLineResources(l)
 	l.FontManager = fontManager
 	l.FontRequest = req.Normalized()
 	face := l.activeFace()
@@ -206,6 +207,7 @@ func (LayoutLayer) SetLineFont(l *Line, fontManager *ft.FontManager, req ft.Font
 	for _, syllable := range l.Syllables {
 		syllable.SetFont(fontManager, l.FontRequest, l.fontsize)
 	}
+	l.invalidateOffsetMetrics()
 	lineLayoutLayer.GenerateLineTranslateImage(l)
 	lineLayoutLayer.LayoutLine(l)
 	lineRendererLayer.RecreateLineImage(l)
@@ -215,6 +217,7 @@ func (LayoutLayer) SetLineFontSize(l *Line, fontsize float64) {
 	if l == nil || fontsize <= 0 {
 		return
 	}
+	lineRendererLayer.ReleaseLineResources(l)
 	l.fontsize = fontsize
 	face := l.activeFace()
 	if face == nil {
@@ -223,6 +226,7 @@ func (LayoutLayer) SetLineFontSize(l *Line, fontsize float64) {
 	for _, syllable := range l.Syllables {
 		syllable.SetFont(l.FontManager, l.FontRequest, fontsize)
 	}
+	l.invalidateOffsetMetrics()
 	lineLayoutLayer.GenerateLineTranslateImage(l)
 	lineLayoutLayer.LayoutLine(l)
 	lineRendererLayer.RecreateLineImage(l)
@@ -232,9 +236,11 @@ func (LayoutLayer) ResizeLine(l *Line, width float64) {
 	if l == nil || width <= 0 {
 		return
 	}
+	lineRendererLayer.ReleaseLineResources(l)
 	applyRefHorizontalLayout(l, width, l.HasDuetInSong)
 	lineLayoutLayer.GenerateLineTranslateImage(l)
 	lineLayoutLayer.LayoutLine(l)
+	l.invalidateOffsetMetrics()
 	if l.isShow {
 		lineRendererLayer.RecreateLineImage(l)
 	}

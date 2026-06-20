@@ -220,7 +220,9 @@ type Line struct {
 	FontRequest ft.FontRequest
 	fontsize    float64
 
-	isShow bool
+	isShow         bool
+	lastVisibleAt  time.Duration
+	lastRenderRank int
 
 	Status LineStatus
 
@@ -233,6 +235,15 @@ type Line struct {
 	AlphaAnimate         *anim.KeyframeAnimation
 	GradientColorAnimate *anim.Tween
 	ScaleAnimate         *anim.Tween
+
+	OffsetMetrics lineOffsetMetrics
+}
+
+type lineOffsetMetrics struct {
+	widths       []float64
+	prefix       []float64
+	valid        bool
+	elementCount int
 }
 
 type LyricMeta struct {
@@ -264,10 +275,11 @@ type Lyrics struct {
 	Dots     InterludeDots
 	Bottom   BottomLine
 
-	nowLyrics          []int
-	renderIndex        []int
-	anchorIndex        int
-	finalLayoutPending bool
+	nowLyrics                  []int
+	renderIndex                []int
+	anchorIndex                int
+	finalLayoutPending         bool
+	hiddenResourcePruneElapsed time.Duration
 
 	Margin        float64
 	HighlightTime time.Duration

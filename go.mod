@@ -15,6 +15,7 @@ require (
 	github.com/hajimehoshi/ebiten/v2 v2.9.9
 	github.com/hashicorp/golang-lru/v2 v2.0.7
 	github.com/tdewolff/font v0.0.0-20260314002930-9f995dac393e
+	github.com/xiaowumin-mark/smtc-suite-go v0.2.0
 	golang.org/x/image v0.39.0
 	golang.org/x/sys v0.43.0
 )
@@ -28,7 +29,6 @@ require (
 	github.com/golang/freetype v0.0.0-20170609003504-e2365dfdc4a0 // indirect
 	github.com/hajimehoshi/bitmapfont/v4 v4.1.0 // indirect
 	github.com/jezek/xgb v1.1.1 // indirect
-	github.com/madelynnblue/go-dsp v1.0.0 // indirect
 	github.com/pierrec/lz4/v4 v4.1.22 // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect
 	github.com/tdewolff/parse/v2 v2.8.5 // indirect

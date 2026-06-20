@@ -12,6 +12,7 @@ import (
 	_ "image/png"
 	"io"
 	"math"
+	"math/rand"
 	"net/http"
 	"os"
 	"strings"
@@ -54,6 +55,15 @@ type MeshGradientRenderer struct {
 	hasLyric       bool
 	volume         float64
 	smoothedVolume float64
+	scaleStrength  float64
+	targetScale    float64
+	smoothedScale  float64
+	satStrength    float64
+	targetSat      float64
+	smoothedSat    float64
+	coverStrength  float64
+	targetCover    float64
+	smoothedCover  float64
 
 	frameTimeMS  float64
 	frameElapsed time.Duration
@@ -98,12 +108,23 @@ func NewMeshGradientRenderer(width, height int) (*MeshGradientRenderer, error) {
 		logicalHeight: height,
 		isNoCover:     true,
 		hasLyric:      true,
+		scaleStrength: 0.05,
+		satStrength:   1.45,
+		coverStrength: 0.10,
 		shaderUniforms: map[string]any{
-			"Time":   float32(0),
-			"Volume": float32(0),
-			"Alpha":  float32(1),
+			"Time":            float32(0),
+			"Volume":          float32(0),
+			"Alpha":           float32(1),
+			"SaturationBoost": float32(1),
+			"CoverScale":      float32(1),
 		},
 	}
+	r.targetScale = 1
+	r.smoothedScale = 1
+	r.targetSat = 1
+	r.smoothedSat = 1
+	r.targetCover = 1
+	r.smoothedCover = 1
 	r.ensureScene()
 	return r, nil
 }
@@ -236,7 +257,40 @@ func (r *MeshGradientRenderer) GetCurrentFPS() int {
 }
 
 func (r *MeshGradientRenderer) SetLowFreqVolume(volume float64) {
-	r.volume = volume / 10.0
+	r.volume = clamp(volume, 0, 1)
+}
+
+func (r *MeshGradientRenderer) SetScaleStrength(strength float64) {
+	r.scaleStrength = clamp(strength, 0, 0.5)
+}
+
+func (r *MeshGradientRenderer) ScaleStrength() float64 {
+	if r == nil {
+		return 0
+	}
+	return r.scaleStrength
+}
+
+func (r *MeshGradientRenderer) SetSaturationStrength(strength float64) {
+	r.satStrength = clamp(strength, 0, 3)
+}
+
+func (r *MeshGradientRenderer) SaturationStrength() float64 {
+	if r == nil {
+		return 0
+	}
+	return r.satStrength
+}
+
+func (r *MeshGradientRenderer) SetCoverScaleStrength(strength float64) {
+	r.coverStrength = clamp(strength, 0, 1)
+}
+
+func (r *MeshGradientRenderer) CoverScaleStrength() float64 {
+	if r == nil {
+		return 0
+	}
+	return r.coverStrength
 }
 
 func (r *MeshGradientRenderer) SetHasLyric(hasLyric bool) {
@@ -330,8 +384,42 @@ func (r *MeshGradientRenderer) onTick(delta time.Duration) bool {
 		}
 	}
 
-	lerp := math.Min(1, delta.Seconds()*1000/100)
+	timeConstantMs := 140.0
+	if r.volume > r.smoothedVolume {
+		timeConstantMs = 55.0
+	}
+	lerp := 1 - math.Exp(-delta.Seconds()*1000/timeConstantMs)
 	r.smoothedVolume += (r.volume - r.smoothedVolume) * lerp
+	r.targetScale = backgroundScaleForVolume(r.smoothedVolume, r.scaleStrength)
+	scaleTimeConstantMs := 200.0
+	if r.targetScale > r.smoothedScale {
+		scaleTimeConstantMs = 70.0
+	}
+	scaleLerp := 1 - math.Exp(-delta.Seconds()*1000/scaleTimeConstantMs)
+	r.smoothedScale += (r.targetScale - r.smoothedScale) * scaleLerp
+	if r.smoothedScale < 1 {
+		r.smoothedScale = 1
+	}
+	r.targetSat = backgroundSaturationForVolume(r.smoothedVolume, r.satStrength)
+	satTimeConstantMs := 260.0
+	if r.targetSat > r.smoothedSat {
+		satTimeConstantMs = 85.0
+	}
+	satLerp := 1 - math.Exp(-delta.Seconds()*1000/satTimeConstantMs)
+	r.smoothedSat += (r.targetSat - r.smoothedSat) * satLerp
+	if r.smoothedSat < 1 {
+		r.smoothedSat = 1
+	}
+	r.targetCover = backgroundCoverScaleForVolume(r.smoothedVolume, r.coverStrength)
+	coverTimeConstantMs := 180.0
+	if r.targetCover > r.smoothedCover {
+		coverTimeConstantMs = 60.0
+	}
+	coverLerp := 1 - math.Exp(-delta.Seconds()*1000/coverTimeConstantMs)
+	r.smoothedCover += (r.targetCover - r.smoothedCover) * coverLerp
+	if r.smoothedCover < 1 {
+		r.smoothedCover = 1
+	}
 	return canBeStatic
 }
 
@@ -369,8 +457,10 @@ func (r *MeshGradientRenderer) Draw(screen *ebiten.Image) {
 	}
 
 	r.shaderUniforms["Time"] = float32(r.frameTimeMS / 10000.0)
-	r.shaderUniforms["Volume"] = float32(r.smoothedVolume)
+	r.shaderUniforms["Volume"] = float32(shaderVisualVolume(r.smoothedVolume))
 	r.shaderUniforms["Alpha"] = float32(1)
+	r.shaderUniforms["SaturationBoost"] = float32(r.smoothedSat)
+	r.shaderUniforms["CoverScale"] = float32(r.smoothedCover)
 
 	aspect := float64(r.sceneWidth) / float64(r.sceneHeight)
 	scaleX := float64(sw) / float64(r.sceneWidth)
@@ -387,6 +477,7 @@ func (r *MeshGradientRenderer) Draw(screen *ebiten.Image) {
 		if len(verts) == 0 || len(inds) == 0 {
 			continue
 		}
+		scaleVerticesAroundCenter(verts, float32(r.sceneWidth), float32(r.sceneHeight), float32(r.smoothedScale))
 
 		r.scene.Clear()
 		drawTrianglesOpts := &ebiten.DrawTrianglesShaderOptions{}
@@ -402,6 +493,44 @@ func (r *MeshGradientRenderer) Draw(screen *ebiten.Image) {
 		drawImageOpts.GeoM.Scale(scaleX, scaleY)
 		drawImageOpts.ColorScale.ScaleAlpha(float32(alpha))
 		screen.DrawImage(r.scene, drawImageOpts)
+	}
+}
+
+func shaderVisualVolume(volume float64) float64 {
+	volume = clamp(volume, 0, 1)
+	return math.Pow(volume, 0.7) * 0.22
+}
+
+func backgroundScaleForVolume(volume, strength float64) float64 {
+	volume = clamp(volume, 0, 1)
+	strength = clamp(strength, 0, 0.5)
+	return 1 + math.Pow(volume, 0.82)*strength
+}
+
+func backgroundSaturationForVolume(volume, strength float64) float64 {
+	volume = clamp(volume, 0, 1)
+	strength = clamp(strength, 0, 3)
+	return 1 + math.Pow(volume, 0.8)*strength
+}
+
+func backgroundCoverScaleForVolume(volume, strength float64) float64 {
+	volume = clamp(volume, 0, 1)
+	strength = clamp(strength, 0, 1)
+	return 1 + math.Pow(volume, 0.75)*strength
+}
+
+func scaleVerticesAroundCenter(vertices []ebiten.Vertex, width, height, scale float32) {
+	if len(vertices) == 0 || width <= 0 || height <= 0 || scale <= 0 {
+		return
+	}
+	if scale == 1 {
+		return
+	}
+	centerX := width * 0.5
+	centerY := height * 0.5
+	for i := range vertices {
+		vertices[i].DstX = centerX + (vertices[i].DstX-centerX)*scale
+		vertices[i].DstY = centerY + (vertices[i].DstY-centerY)*scale
 	}
 }
 
@@ -589,23 +718,6 @@ func preprocessAlbumImage(src image.Image) *ebiten.Image {
 	}
 	small := imaging.Resize(src, 32, 32, imaging.Linear)
 	nrgba := imaging.Clone(small)
-	stats := analyzeAlbumImageStats(nrgba)
-	lumaRange := stats.maxLuma - stats.minLuma
-	satBoost := clamp(
-		1.35-math.Max(0, stats.avgSat-0.28)*0.8-math.Max(0, lumaRange-0.48)*0.25,
-		0.95,
-		1.35,
-	)
-	contrastScale := clamp(
-		1.08-math.Max(0, stats.contrast-0.16)*0.65-math.Max(0, lumaRange-0.52)*0.3,
-		0.88,
-		1.08,
-	)
-	brightnessScale := clamp(
-		1.0-math.Max(0, stats.avgLuma-0.48)*0.55-math.Max(0, stats.maxLuma-0.82)*0.28,
-		0.8,
-		1.0,
-	)
 
 	pixels := nrgba.Pix
 	for i := 0; i+3 < len(pixels); i += 4 {
@@ -613,30 +725,130 @@ func preprocessAlbumImage(src image.Image) *ebiten.Image {
 		g := float64(pixels[i+1])
 		b := float64(pixels[i+2])
 
-		// Keep the cover's original hue more directly so the background
-		// doesn't look like it has a gray wash over it.
+		// ref-like fixed tone: low contrast, strong saturation, then contrast + brightness.
+		r = (r-128)*0.4 + 128
+		g = (g-128)*0.4 + 128
+		b = (b-128)*0.4 + 128
+
 		gray := r*0.3 + g*0.59 + b*0.11
-		r = gray + (r-gray)*satBoost
-		g = gray + (g-gray)*satBoost
-		b = gray + (b-gray)*satBoost
+		r = gray*-2.0 + r*3.0
+		g = gray*-2.0 + g*3.0
+		b = gray*-2.0 + b*3.0
 
-		// When the cover is already very bright or has a huge span, gently
-		// compress the range instead of letting the background blow out.
-		r = (r-128)*contrastScale + 128
-		g = (g-128)*contrastScale + 128
-		b = (b-128)*contrastScale + 128
+		r = (r-128)*1.7 + 128
+		g = (g-128)*1.7 + 128
+		b = (b-128)*1.7 + 128
 
-		r *= brightnessScale
-		g *= brightnessScale
-		b *= brightnessScale
+		r *= 0.75
+		g *= 0.75
+		b *= 0.75
 
 		pixels[i] = floatToByte(r)
 		pixels[i+1] = floatToByte(g)
 		pixels[i+2] = floatToByte(b)
 	}
 
-	blurNRGBA(nrgba, 2, 4)
+	shuffleCoverTiles(nrgba, 2, rand.New(rand.NewSource(time.Now().UnixNano())))
+	blurNRGBA(nrgba, 3.0)
 	return ebiten.NewImageFromImage(nrgba)
+}
+
+func shuffleCoverTiles(img *image.NRGBA, grid int, rng *rand.Rand) {
+	if img == nil || rng == nil || grid < 2 {
+		return
+	}
+	b := img.Bounds()
+	w := b.Dx()
+	h := b.Dy()
+	if w <= 0 || h <= 0 {
+		return
+	}
+	tileW := w / grid
+	tileH := h / grid
+	if tileW <= 0 || tileH <= 0 {
+		return
+	}
+	total := grid * grid
+	perm := derangedPermutation(total, rng)
+	if len(perm) != total {
+		return
+	}
+	src := image.NewNRGBA(image.Rect(0, 0, w, h))
+	copy(src.Pix, img.Pix)
+	for dstIdx, srcIdx := range perm {
+		dx := dstIdx % grid
+		dy := dstIdx / grid
+		sx := srcIdx % grid
+		sy := srcIdx / grid
+
+		dstX0 := dx * tileW
+		dstY0 := dy * tileH
+		srcX0 := sx * tileW
+		srcY0 := sy * tileH
+		dstX1 := dstX0 + tileW
+		dstY1 := dstY0 + tileH
+		srcX1 := srcX0 + tileW
+		srcY1 := srcY0 + tileH
+		if dx == grid-1 {
+			dstX1 = w
+		}
+		if dy == grid-1 {
+			dstY1 = h
+		}
+		if sx == grid-1 {
+			srcX1 = w
+		}
+		if sy == grid-1 {
+			srcY1 = h
+		}
+		for y := 0; y < srcY1-srcY0 && dstY0+y < dstY1; y++ {
+			for x := 0; x < srcX1-srcX0 && dstX0+x < dstX1; x++ {
+				si := src.PixOffset(srcX0+x, srcY0+y)
+				di := img.PixOffset(dstX0+x, dstY0+y)
+				copy(img.Pix[di:di+4], src.Pix[si:si+4])
+			}
+		}
+	}
+}
+
+func derangedPermutation(n int, rng *rand.Rand) []int {
+	if n <= 0 {
+		return nil
+	}
+	if n == 1 {
+		return []int{0}
+	}
+	perm := make([]int, n)
+	for i := range perm {
+		perm[i] = i
+	}
+	for attempt := 0; attempt < 64; attempt++ {
+		for i := n - 1; i > 0; i-- {
+			j := rng.Intn(i + 1)
+			perm[i], perm[j] = perm[j], perm[i]
+		}
+		ok := true
+		for i := range perm {
+			if perm[i] == i {
+				ok = false
+				break
+			}
+		}
+		if ok {
+			return append([]int(nil), perm...)
+		}
+		for i := range perm {
+			perm[i] = i
+		}
+	}
+	for i := 0; i < n-1; i += 2 {
+		perm[i], perm[i+1] = i+1, i
+	}
+	if n%2 == 1 {
+		perm[n-1] = n - 2
+		perm[n-2] = n - 1
+	}
+	return perm
 }
 
 type albumImageStats struct {
@@ -645,62 +857,6 @@ type albumImageStats struct {
 	maxLuma  float64
 	contrast float64
 	avgSat   float64
-}
-
-func analyzeAlbumImageStats(img *image.NRGBA) albumImageStats {
-	stats := albumImageStats{
-		minLuma: 1,
-	}
-	if img == nil || len(img.Pix) == 0 {
-		stats.minLuma = 0
-		return stats
-	}
-
-	var sumLuma, sumLumaSq, sumSat float64
-	var count float64
-	for i := 0; i+3 < len(img.Pix); i += 4 {
-		alpha := float64(img.Pix[i+3]) / 255.0
-		if alpha <= 0 {
-			continue
-		}
-
-		r := float64(img.Pix[i]) / 255.0
-		g := float64(img.Pix[i+1]) / 255.0
-		b := float64(img.Pix[i+2]) / 255.0
-		luma := 0.2126*r + 0.7152*g + 0.0722*b
-		maxC := math.Max(r, math.Max(g, b))
-		minC := math.Min(r, math.Min(g, b))
-		sat := 0.0
-		if maxC > 0 {
-			sat = (maxC - minC) / maxC
-		}
-
-		sumLuma += luma
-		sumLumaSq += luma * luma
-		sumSat += sat
-		count++
-
-		if luma < stats.minLuma {
-			stats.minLuma = luma
-		}
-		if luma > stats.maxLuma {
-			stats.maxLuma = luma
-		}
-	}
-
-	if count == 0 {
-		stats.minLuma = 0
-		return stats
-	}
-
-	stats.avgLuma = sumLuma / count
-	stats.avgSat = sumSat / count
-	variance := sumLumaSq/count - stats.avgLuma*stats.avgLuma
-	if variance < 0 {
-		variance = 0
-	}
-	stats.contrast = math.Sqrt(variance)
-	return stats
 }
 
 func floatToByte(v float64) uint8 {
@@ -713,8 +869,8 @@ func floatToByte(v float64) uint8 {
 	return uint8(v + 0.5)
 }
 
-func blurNRGBA(img *image.NRGBA, radius, quality int) {
-	if img == nil || radius <= 0 || quality <= 0 {
+func blurNRGBA(img *image.NRGBA, blurPx float64) {
+	if img == nil || blurPx <= 0 {
 		return
 	}
 	b := img.Bounds()
@@ -723,48 +879,107 @@ func blurNRGBA(img *image.NRGBA, radius, quality int) {
 	if w <= 0 || h <= 0 {
 		return
 	}
+	sigma := math.Max(blurPx*0.5, 0.01)
+	radius := int(math.Ceil(sigma * 3))
+	if radius < 1 {
+		radius = 1
+	}
+	weights := gaussianWeights(radius, sigma)
 	src := image.NewNRGBA(image.Rect(0, 0, w, h))
 	copy(src.Pix, img.Pix)
+	temp := image.NewNRGBA(image.Rect(0, 0, w, h))
+	dst := image.NewNRGBA(image.Rect(0, 0, w, h))
+	horizontalBlurNRGBA(temp, src, weights, radius)
+	verticalBlurNRGBA(dst, temp, weights, radius)
+	copy(img.Pix, dst.Pix)
+}
 
-	for q := 0; q < quality; q++ {
-		dst := image.NewNRGBA(image.Rect(0, 0, w, h))
-		for y := 0; y < h; y++ {
-			for x := 0; x < w; x++ {
-				sumR, sumG, sumB, sumA := 0, 0, 0, 0
-				count := 0
-				for ky := -radius; ky <= radius; ky++ {
-					yy := y + ky
-					if yy < 0 {
-						yy = 0
-					} else if yy >= h {
-						yy = h - 1
-					}
-					for kx := -radius; kx <= radius; kx++ {
-						xx := x + kx
-						if xx < 0 {
-							xx = 0
-						} else if xx >= w {
-							xx = w - 1
-						}
-						i := (yy*w + xx) * 4
-						sumR += int(src.Pix[i])
-						sumG += int(src.Pix[i+1])
-						sumB += int(src.Pix[i+2])
-						sumA += int(src.Pix[i+3])
-						count++
-					}
-				}
-				if count == 0 {
-					continue
-				}
-				i := (y*w + x) * 4
-				dst.Pix[i] = uint8(sumR / count)
-				dst.Pix[i+1] = uint8(sumG / count)
-				dst.Pix[i+2] = uint8(sumB / count)
-				dst.Pix[i+3] = uint8(sumA / count)
-			}
-		}
-		src = dst
+func gaussianWeights(radius int, sigma float64) []float64 {
+	weights := make([]float64, radius+1)
+	if radius <= 0 {
+		weights[0] = 1
+		return weights
 	}
-	copy(img.Pix, src.Pix)
+	twoSigmaSq := 2 * sigma * sigma
+	sum := 0.0
+	for i := 0; i <= radius; i++ {
+		w := math.Exp(-(float64(i) * float64(i)) / twoSigmaSq)
+		weights[i] = w
+		if i == 0 {
+			sum += w
+		} else {
+			sum += 2 * w
+		}
+	}
+	for i := range weights {
+		weights[i] /= sum
+	}
+	return weights
+}
+
+func horizontalBlurNRGBA(dst, src *image.NRGBA, weights []float64, radius int) {
+	b := src.Bounds()
+	w := b.Dx()
+	h := b.Dy()
+	for y := 0; y < h; y++ {
+		for x := 0; x < w; x++ {
+			var sumR, sumG, sumB, sumA float64
+			for k := -radius; k <= radius; k++ {
+				xx := x + k
+				if xx < 0 {
+					xx = 0
+				} else if xx >= w {
+					xx = w - 1
+				}
+				i := src.PixOffset(xx, y)
+				wgt := weights[absInt(k)]
+				sumR += float64(src.Pix[i]) * wgt
+				sumG += float64(src.Pix[i+1]) * wgt
+				sumB += float64(src.Pix[i+2]) * wgt
+				sumA += float64(src.Pix[i+3]) * wgt
+			}
+			i := dst.PixOffset(x, y)
+			dst.Pix[i] = uint8(sumR + 0.5)
+			dst.Pix[i+1] = uint8(sumG + 0.5)
+			dst.Pix[i+2] = uint8(sumB + 0.5)
+			dst.Pix[i+3] = uint8(sumA + 0.5)
+		}
+	}
+}
+
+func verticalBlurNRGBA(dst, src *image.NRGBA, weights []float64, radius int) {
+	b := src.Bounds()
+	w := b.Dx()
+	h := b.Dy()
+	for y := 0; y < h; y++ {
+		for x := 0; x < w; x++ {
+			var sumR, sumG, sumB, sumA float64
+			for k := -radius; k <= radius; k++ {
+				yy := y + k
+				if yy < 0 {
+					yy = 0
+				} else if yy >= h {
+					yy = h - 1
+				}
+				i := src.PixOffset(x, yy)
+				wgt := weights[absInt(k)]
+				sumR += float64(src.Pix[i]) * wgt
+				sumG += float64(src.Pix[i+1]) * wgt
+				sumB += float64(src.Pix[i+2]) * wgt
+				sumA += float64(src.Pix[i+3]) * wgt
+			}
+			i := dst.PixOffset(x, y)
+			dst.Pix[i] = uint8(sumR + 0.5)
+			dst.Pix[i+1] = uint8(sumG + 0.5)
+			dst.Pix[i+2] = uint8(sumB + 0.5)
+			dst.Pix[i+3] = uint8(sumA + 0.5)
+		}
+	}
+}
+
+func absInt(v int) int {
+	if v < 0 {
+		return -v
+	}
+	return v
 }

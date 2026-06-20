@@ -15,6 +15,9 @@ func TestInterludeDotsMetrics(t *testing.T) {
 	if !nearlyEqual(dots.Gap, 10) {
 		t.Fatalf("gap = %v, want 10", dots.Gap)
 	}
+	if !nearlyEqual(dots.PaddingX, 8) {
+		t.Fatalf("paddingX = %v, want 8", dots.PaddingX)
+	}
 	if dots.Margin != 16 {
 		t.Fatalf("margin = %v, want 16", dots.Margin)
 	}

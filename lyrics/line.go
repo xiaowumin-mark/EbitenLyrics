@@ -34,6 +34,7 @@ func NewLine(st, et time.Duration, isduet, isbg bool, ts string, fontManager *ft
 		SmartTranslateWrap: true,
 		fontsize:           fs,
 		isShow:             false,
+		lastRenderRank:     -1,
 		Status:             LineStatusHidden,
 		imageDirty:         true,
 		FontManager:        fontManager,
@@ -104,6 +105,7 @@ func (l *Line) SetSyllables(syllables []*LineSyllable) {
 		}
 	}
 	l.OuterSyllableElements = outerSyllableElements
+	l.invalidateOffsetMetrics()
 	l.markImageDirty()
 }
 
@@ -235,6 +237,7 @@ func (l *Line) SetFD(fd float64) {
 	for _, line := range l.BackgroundLines {
 		line.SetFD(fd)
 	}
+	l.invalidateOffsetMetrics()
 	l.markImageDirty()
 }
 
@@ -271,4 +274,11 @@ func (l *Line) setStatus(status LineStatus) {
 	if status.UsesPreviewBitmap() && !prev.UsesPreviewBitmap() {
 		l.markImageDirty()
 	}
+}
+
+func (l *Line) invalidateOffsetMetrics() {
+	if l == nil {
+		return
+	}
+	l.OffsetMetrics = lineOffsetMetrics{}
 }

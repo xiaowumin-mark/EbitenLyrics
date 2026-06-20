@@ -7,6 +7,7 @@ import (
 	"errors"
 	"image/color"
 	"math"
+	"sync"
 
 	ft "github.com/xiaowumin-mark/EbitenLyrics/font"
 	"github.com/xiaowumin-mark/EbitenLyrics/lp"
@@ -35,7 +36,115 @@ type SyllableImage struct {
 	FontManager            *ft.FontManager
 	FontRequest            ft.FontRequest
 	FontSize               float64
-	tempImage              *ebiten.Image
+}
+
+type scratchImagePool struct {
+	mu             sync.Mutex
+	images         []*ebiten.Image
+	retainedPixels int
+}
+
+var syllableScratchImages scratchImagePool
+
+const (
+	scratchWidthBucket      = 64
+	scratchHeightBucket     = 16
+	scratchMaxRetained      = 8
+	scratchMaxRetainedPixel = 2 * 1024 * 1024
+)
+
+func bucketScratchDimension(value, bucket int) int {
+	if value < 1 {
+		value = 1
+	}
+	if bucket <= 1 {
+		return value
+	}
+	return ((value + bucket - 1) / bucket) * bucket
+}
+
+func bucketScratchSize(width, height int) (int, int) {
+	return bucketScratchDimension(width, scratchWidthBucket), bucketScratchDimension(height, scratchHeightBucket)
+}
+
+func (p *scratchImagePool) acquire(width, height int) *ebiten.Image {
+	if width < 1 {
+		width = 1
+	}
+	if height < 1 {
+		height = 1
+	}
+	width, height = bucketScratchSize(width, height)
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	bestIndex := -1
+	bestPixels := 0
+	for i := len(p.images) - 1; i >= 0; i-- {
+		img := p.images[i]
+		if img == nil {
+			p.images = append(p.images[:i], p.images[i+1:]...)
+			continue
+		}
+		w, h := img.Size()
+		if w < width || h < height {
+			continue
+		}
+		pixels := w * h
+		if bestIndex == -1 || pixels < bestPixels {
+			bestIndex = i
+			bestPixels = pixels
+		}
+	}
+	if bestIndex >= 0 {
+		img := p.images[bestIndex]
+		p.images = append(p.images[:bestIndex], p.images[bestIndex+1:]...)
+		p.retainedPixels -= bestPixels
+		if p.retainedPixels < 0 {
+			p.retainedPixels = 0
+		}
+		return img
+	}
+	return ebiten.NewImage(width, height)
+}
+
+func (p *scratchImagePool) release(img *ebiten.Image) {
+	if img == nil {
+		return
+	}
+	img.Clear()
+	w, h := img.Size()
+	pixels := w * h
+	p.mu.Lock()
+	if len(p.images) >= scratchMaxRetained || p.retainedPixels+pixels > scratchMaxRetainedPixel {
+		p.mu.Unlock()
+		img.Deallocate()
+		return
+	}
+	p.images = append(p.images, img)
+	p.retainedPixels += pixels
+	p.mu.Unlock()
+}
+
+func (p *scratchImagePool) purge() {
+	p.mu.Lock()
+	images := p.images
+	p.images = nil
+	p.retainedPixels = 0
+	p.mu.Unlock()
+	for _, img := range images {
+		if img != nil {
+			img.Deallocate()
+		}
+	}
+}
+
+func (p *scratchImagePool) stats() (int, int) {
+	if p == nil {
+		return 0, 0
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return len(p.images), p.retainedPixels
 }
 
 func CreateSyllableImage(
@@ -177,6 +286,10 @@ func (s *SyllableImage) updateMetrics() {
 }
 
 func (s *SyllableImage) ensureResources() bool {
+	return s.ensureBaseResources() && s.ensureHighlightResources()
+}
+
+func (s *SyllableImage) ensureBaseResources() bool {
 	if s == nil {
 		return false
 	}
@@ -199,6 +312,18 @@ func (s *SyllableImage) ensureResources() bool {
 		s.gradientKey = key
 		s.hasGradKey = img != nil
 	}
+	return s.TextMask != nil && s.GradientImage != nil
+}
+
+func (s *SyllableImage) ensureHighlightResources() bool {
+	if s == nil {
+		return false
+	}
+	if !s.ensureBaseResources() {
+		return false
+	}
+	targetW := safeImageLength(s.Width)
+	targetH := safeImageLength(s.Height)
 	if s.HighlightGradientImage == nil {
 		startColor, endColor := s.highlightGradientColors()
 		img, key := acquireGradient(targetW, targetH, s.Fd, startColor, endColor)
@@ -206,18 +331,7 @@ func (s *SyllableImage) ensureResources() bool {
 		s.highlightGradientKey = key
 		s.hasHighlightGradKey = img != nil
 	}
-	if s.tempImage != nil {
-		w, h := s.tempImage.Size()
-		if w != targetW || h != targetH {
-			s.tempImage.Deallocate()
-			s.tempImage = nil
-		}
-	}
-	if s.tempImage == nil {
-		s.tempImage = ebiten.NewImage(targetW, targetH)
-	}
-
-	return s.TextMask != nil && s.GradientImage != nil && s.HighlightGradientImage != nil && s.tempImage != nil
+	return s.TextMask != nil && s.HighlightGradientImage != nil
 }
 
 func (s *SyllableImage) releaseTextMask() {
@@ -263,17 +377,19 @@ func (s *SyllableImage) resetResources() {
 	s.releaseTextMask()
 	s.releaseGradient()
 	s.releaseHighlightGradient()
-	if s.tempImage != nil {
-		s.tempImage.Deallocate()
-		s.tempImage = nil
-	}
 }
 
 func (s *SyllableImage) Draw(img *ebiten.Image, offset float64, alpha float64, pos *Position) {
-	s.drawMasked(img, s.GradientImage, offset, alpha, pos, ebiten.BlendSourceOver)
+	if s == nil || !s.ensureBaseResources() {
+		return
+	}
+	s.drawMasked(img, s.GradientImage, offset, alpha, pos, ebiten.BlendLighter)
 }
 
 func (s *SyllableImage) DrawHighlight(img *ebiten.Image, offset float64, alpha float64, pos *Position) {
+	if s == nil || !s.ensureHighlightResources() {
+		return
+	}
 	s.drawMasked(img, s.HighlightGradientImage, offset, alpha, pos, ebiten.BlendLighter)
 }
 
@@ -286,26 +402,28 @@ func (s *SyllableImage) drawMasked(img, gradient *ebiten.Image, offset float64, 
 	if s == nil || img == nil || pos == nil {
 		return
 	}
-	if !s.ensureResources() {
-		return
-	}
 	if gradient == nil {
 		return
 	}
 
-	s.tempImage.Clear()
-	s.tempImage.DrawImage(s.TextMask, &ebiten.DrawImageOptions{})
+	targetW := safeImageLength(s.Width)
+	targetH := safeImageLength(s.Height)
+	scratch := syllableScratchImages.acquire(targetW, targetH)
+	defer syllableScratchImages.release(scratch)
+
+	scratch.Clear()
+	scratch.DrawImage(s.TextMask, &ebiten.DrawImageOptions{})
 
 	op := &ebiten.DrawImageOptions{}
 	op.Blend = ebiten.BlendSourceIn
 	op.GeoM.Translate(lp.LP(offset), 0)
 	op.GeoM.Scale(1, math.Max(1, lp.LP(s.Height)))
 	op.ColorScale.ScaleAlpha(float32(alpha))
-	s.tempImage.DrawImage(gradient, op)
+	scratch.DrawImage(gradient, op)
 
 	finalop := &ebiten.DrawImageOptions{}
 	finalop.GeoM = TransformToGeoM(pos)
-	drawImageResample4x4(img, s.tempImage, finalop.GeoM, 1, blend)
+	drawImageResample4x4(img, scratch, finalop.GeoM, 1, blend)
 }
 
 func (s *SyllableImage) Dispose() {
@@ -456,7 +574,7 @@ func (s *SyllableImage) GetGradientImage() *ebiten.Image {
 }
 
 func (s *SyllableImage) GetTempImage() *ebiten.Image {
-	return s.tempImage
+	return nil
 }
 
 func (s *SyllableImage) highlightGradientColors() (color.RGBA, color.RGBA) {

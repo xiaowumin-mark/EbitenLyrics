@@ -841,12 +841,12 @@ scrollBoundary.maxOffset = curPos + scrollOffset - viewportHeight / 2;
 
 实现要点：
 
-- `newLayoutState()` 默认启用 blur，`BlurStrength` 回到 ref 基线倍率 `1`。
+- `newLayoutState()` 默认启用 blur，`BlurStrength` 回到 ref 基线倍率 `1.5`。
 - `Home.OnCreate()` 默认启用歌词 blur，并把 debug slider 初始值设为 `1`。
 - 背景行 active 与暂停显示 alpha 对齐 ref CSS 的 `0.4`，不再使用主行式 `1 / 0.85`。
 - 背景行播放中 inactive 仍不占位、不显示；active 或暂停时 reserve space。
 - `applyLinePresentation` 会把 presentation 的 render mode 写回 line，避免后续渲染忽略 active / inactive 模式切换。
-- 保留 blur 运行时调试倍率，但默认值为 ref 的 `1`，用于后续视觉微调而非默认补偿。
+- 保留 blur 运行时调试倍率，但默认值为 ref 的 `1.5`，用于后续视觉微调而非默认补偿。
 
 ### 计划六 D：interlude dots 精修
 

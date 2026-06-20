@@ -41,7 +41,7 @@ func (d *InterludeDots) UpdateMetrics(fontSize, viewportHeight float64) {
 	}
 	d.DotSize = clampDotsFloat(preferred, fontSize*0.5, fontSize*3)
 	d.Gap = fontSize * 0.25
-	d.PaddingX = fontSize * 0.75
+	d.PaddingX = fontSize * 0.2
 	// CSS ref uses padding-block: 2.5% on an element whose height is dot size,
 	// so vertical padding is dotSize * 2.5%, not viewport height * 2.5%.
 	d.PaddingY = d.DotSize * 0.025

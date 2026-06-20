@@ -15,7 +15,11 @@ func applyRefHorizontalLayout(line *Line, width float64, hasDuet bool) {
 	line.GetPosition().SetX(0)
 	line.GetPosition().SetW(width)
 	line.HasDuetInSong = hasDuet
-	basePadding := lineBasePadding(line.fontsize, width)
+	paddingFontSize := line.fontsize
+	if line.IsBackground {
+		paddingFontSize *= 1.5
+	}
+	basePadding := lineBasePadding(paddingFontSize, width)
 	left := basePadding
 	right := basePadding
 	if hasDuet {

@@ -28,8 +28,9 @@ const (
 	lineEnterDuration         = 500 * time.Millisecond
 	lineExitDuration          = 600 * time.Millisecond
 	lineHighlightFadeDuration = 320 * time.Millisecond
-	backgroundEnterDuration   = 700 * time.Millisecond
-	backgroundEnterDelay      = 200 * time.Millisecond
+	backgroundEnterDuration   = 500 * time.Millisecond
+	backgroundEnterDelay      = 250 * time.Millisecond
+	backgroundActiveAlpha     = 0.4
 	backgroundExitDuration    = 300 * time.Millisecond
 
 	scrollReuseTargetEpsilon = 0.5
@@ -49,6 +50,7 @@ func (l *Lyrics) Tick(dt time.Duration) {
 		dt = time.Second / 60
 	}
 	updateLyricsSprings(l, dt)
+	lineRendererLayer.TickHiddenResourcePrune(l, dt)
 }
 
 func (l *Line) ToNormal(lyrics *Lyrics) {
@@ -105,12 +107,78 @@ func (AnimationLayer) syncPreviewState(l *Line) {
 	l.setStatus(LineStatusPreviewStatic)
 }
 
+func (AnimationLayer) finishActiveExitToPreview(l *Line) {
+	if l == nil || l.Status == LineStatusHidden {
+		return
+	}
+	if l.ScrollAnimate != nil {
+		l.setStatus(LineStatusPreviewScrolling)
+		return
+	}
+	l.setStatus(LineStatusPreviewStatic)
+}
+
+func (AnimationLayer) markPreviewBitmapDirty(l *Line) {
+	if l == nil || !l.Status.UsesPreviewBitmap() {
+		return
+	}
+	l.markImageDirty()
+}
+
+func (AnimationLayer) resetLinePreviewContent(l *Line) {
+	if l == nil {
+		return
+	}
+	changed := false
+	for _, e := range l.OuterSyllableElements {
+		if e == nil {
+			continue
+		}
+		if e.BackgroundBlurText != nil {
+			e.BackgroundBlurText.Dispose()
+			e.BackgroundBlurText = nil
+			changed = true
+		}
+		if e.GetPosition().GetTranslateX() != 0 {
+			e.GetPosition().SetTranslateX(0)
+			changed = true
+		}
+		if e.GetPosition().GetTranslateY() != 0 {
+			e.GetPosition().SetTranslateY(0)
+			changed = true
+		}
+		if e.GetPosition().GetScaleX() != 1 {
+			e.GetPosition().SetScaleX(1)
+			changed = true
+		}
+		if e.GetPosition().GetScaleY() != 1 {
+			e.GetPosition().SetScaleY(1)
+			changed = true
+		}
+		if e.Alpha != 0 {
+			e.Alpha = 0
+			changed = true
+		}
+		if l.RenderMode == RenderModeLine && e.NowOffset != 0 {
+			e.NowOffset = 0
+			changed = true
+		}
+	}
+	if changed {
+		l.markImageDirty()
+	}
+}
+
 func (AnimationLayer) settleElementHighlightToRest(e *SyllableElement, lyrics *Lyrics, duration time.Duration) {
 	if e == nil {
 		return
 	}
+	var manager *anim.Manager
+	if lyrics != nil {
+		manager = lyrics.AnimateManager
+	}
 	if e.HighlightAnimate != nil {
-		e.HighlightAnimate.Cancel()
+		cancelManagedAnimation(manager, e.HighlightAnimate)
 		e.HighlightAnimate = nil
 	}
 
@@ -205,7 +273,7 @@ func (AnimationLayer) settleLineToPreview(l *Line, lyrics *Lyrics, delay time.Du
 	lineAnimationLayer.cancelLineStatusSettle(l, lyrics.AnimateManager)
 	if delay <= 0 {
 		if l.Status == LineStatusActiveExit {
-			lineAnimationLayer.syncPreviewState(l)
+			lineAnimationLayer.finishActiveExitToPreview(l)
 		}
 		return
 	}
@@ -222,7 +290,7 @@ func (AnimationLayer) settleLineToPreview(l *Line, lyrics *Lyrics, delay time.Du
 		func() {
 			l.StatusSettleAnimate = nil
 			if l.Status == LineStatusActiveExit {
-				lineAnimationLayer.syncPreviewState(l)
+				lineAnimationLayer.finishActiveExitToPreview(l)
 			}
 		},
 	)
@@ -572,9 +640,11 @@ func (AnimationLayer) scrollLyricsTo(l *Lyrics, activeIndexes []int, anchorIndex
 
 	for i, el := range l.Lines {
 		if _, ok := renderSet[i]; ok {
+			el.lastVisibleAt = l.Timeline.CurrentTime
+			el.lastRenderRank = absInt(i - anchorIndex)
 			lineRendererLayer.RenderLine(el)
 		} else {
-			lineRendererLayer.DisposeLine(el)
+			lineRendererLayer.HideLineWithManager(el, l.AnimateManager)
 		}
 
 		if el.isShow {
@@ -586,6 +656,7 @@ func (AnimationLayer) scrollLyricsTo(l *Lyrics, activeIndexes []int, anchorIndex
 			}
 		}
 	}
+	lineRendererLayer.ReclaimHiddenLineResources(l, renderSet, anchorIndex)
 }
 
 func safeLineHeight(line *Line, fallback float64) float64 {
@@ -647,9 +718,9 @@ func (AnimationLayer) UpdateLyrics(l *Lyrics, t time.Duration) {
 		if t >= line.StartTime && t < line.EndTime {
 			// 逐行模式不需要逐字扫光偏移，避免出现“进度条式”高亮。
 			if line.RenderMode != RenderModeLine && useRealtimeOffsetFormula {
-				applyRealtimeOffsets(line.OuterSyllableElements, t, l.FD)
+				line.applyRealtimeOffsets(t, l.FD)
 				for _, bgLine := range line.BackgroundLines {
-					applyRealtimeOffsets(bgLine.OuterSyllableElements, t, l.FD)
+					bgLine.applyRealtimeOffsets(t, l.FD)
 				}
 			}
 		}
@@ -696,7 +767,7 @@ func (AnimationLayer) NormalizeLine(l *Line, lyrics *Lyrics) {
 		l.ScaleAnimate = nil
 	}
 	if l.GradientColorAnimate != nil {
-		l.GradientColorAnimate.Cancel()
+		cancelManagedAnimation(lyrics.AnimateManager, l.GradientColorAnimate)
 		l.GradientColorAnimate = nil
 	}
 
@@ -711,7 +782,7 @@ func (AnimationLayer) NormalizeLine(l *Line, lyrics *Lyrics) {
 				continue
 			}
 			if e.UpAnimate != nil {
-				e.UpAnimate.Cancel()
+				cancelManagedAnimation(lyrics.AnimateManager, e.UpAnimate)
 				e.UpAnimate = nil
 			}
 			lineAnimationLayer.settleElementHighlightToRest(e, lyrics, highlightSettleDuration)
@@ -744,11 +815,11 @@ func (AnimationLayer) NormalizeLine(l *Line, lyrics *Lyrics) {
 			}
 			// 逐行模式下清理逐字动画残留，确保退出态不会保留局部形变或模糊。
 			if e.UpAnimate != nil {
-				e.UpAnimate.Cancel()
+				cancelManagedAnimation(lyrics.AnimateManager, e.UpAnimate)
 				e.UpAnimate = nil
 			}
 			if e.HighlightAnimate != nil {
-				e.HighlightAnimate.Cancel()
+				cancelManagedAnimation(lyrics.AnimateManager, e.HighlightAnimate)
 				e.HighlightAnimate = nil
 			}
 			if e.BackgroundBlurText != nil {
@@ -768,7 +839,7 @@ func (AnimationLayer) NormalizeLine(l *Line, lyrics *Lyrics) {
 			continue
 		}
 		if e.Animate != nil {
-			e.Animate.Cancel()
+			cancelManagedAnimation(lyrics.AnimateManager, e.Animate)
 			e.Animate = nil
 		}
 		if e.Alpha > currentHighlightAlpha {
@@ -791,6 +862,7 @@ func (AnimationLayer) NormalizeLine(l *Line, lyrics *Lyrics) {
 					}
 					e.Alpha = value
 				}
+				lineAnimationLayer.markPreviewBitmapDirty(l)
 			},
 			func() {
 				for _, e := range l.OuterSyllableElements {
@@ -800,6 +872,7 @@ func (AnimationLayer) NormalizeLine(l *Line, lyrics *Lyrics) {
 					e.Alpha = 0
 				}
 				l.GradientColorAnimate = nil
+				lineAnimationLayer.markPreviewBitmapDirty(l)
 			},
 		)
 		lyrics.AnimateManager.Add(l.GradientColorAnimate)
@@ -808,7 +881,7 @@ func (AnimationLayer) NormalizeLine(l *Line, lyrics *Lyrics) {
 	settleDelay := lineExitDuration
 	if l.IsBackground {
 		if l.AlphaAnimate != nil {
-			l.AlphaAnimate.Cancel()
+			cancelManagedAnimation(lyrics.AnimateManager, l.AlphaAnimate)
 			l.AlphaAnimate = nil
 		}
 		l.AlphaAnimate = anim.NewKeyframeAnimation(
@@ -854,28 +927,31 @@ func (AnimationLayer) LineAnimate(l *Line, lyrics *Lyrics, fd float64) {
 	lineAnimationLayer.FrameAnimate(l, lyrics, fd)
 
 	for _, it := range l.BackgroundLines {
+		if it == nil {
+			continue
+		}
 		lineAnimationLayer.cancelLineStatusSettle(it, lyrics.AnimateManager)
 		it.setStatus(LineStatusActiveEnter)
 		if it.AlphaAnimate != nil {
-			it.AlphaAnimate.Cancel()
+			cancelManagedAnimation(lyrics.AnimateManager, it.AlphaAnimate)
 			it.AlphaAnimate = nil
 		}
 		it.AlphaAnimate = anim.NewKeyframeAnimation(
 			uuid.NewString(),
 			backgroundEnterDuration,
 			backgroundEnterDelay,
-			1,
+			0,
 			false,
 			[]anim.Keyframe{
 				{Offset: 0, Values: []float64{it.GetPosition().GetAlpha()}, Ease: anim.EaseOut},
-				{Offset: 1, Values: []float64{1}, Ease: anim.EaseOut},
+				{Offset: 1, Values: []float64{backgroundActiveAlpha}, Ease: anim.EaseOut},
 			},
 			func(value []float64) {
 				it.Position.SetAlpha(value[0])
 			},
 			func() {
 				it.AlphaAnimate = nil
-				it.Position.SetAlpha(1)
+				it.Position.SetAlpha(backgroundActiveAlpha)
 				if it.Status == LineStatusActiveEnter {
 					it.setStatus(LineStatusActivePlaying)
 				}
@@ -944,7 +1020,7 @@ func (AnimationLayer) frameAnimateLineMode(l *Line, lyrics *Lyrics) {
 	}
 
 	if l.GradientColorAnimate != nil {
-		l.GradientColorAnimate.Cancel()
+		cancelManagedAnimation(lyrics.AnimateManager, l.GradientColorAnimate)
 		l.GradientColorAnimate = nil
 	}
 
@@ -954,15 +1030,15 @@ func (AnimationLayer) frameAnimateLineMode(l *Line, lyrics *Lyrics) {
 			continue
 		}
 		if e.Animate != nil {
-			e.Animate.Cancel()
+			cancelManagedAnimation(lyrics.AnimateManager, e.Animate)
 			e.Animate = nil
 		}
 		if e.HighlightAnimate != nil {
-			e.HighlightAnimate.Cancel()
+			cancelManagedAnimation(lyrics.AnimateManager, e.HighlightAnimate)
 			e.HighlightAnimate = nil
 		}
 		if e.UpAnimate != nil {
-			e.UpAnimate.Cancel()
+			cancelManagedAnimation(lyrics.AnimateManager, e.UpAnimate)
 			e.UpAnimate = nil
 		}
 		if e.BackgroundBlurText != nil {
@@ -1030,7 +1106,7 @@ func (AnimationLayer) FrameAnimate(l *Line, lyrics *Lyrics, fd float64) {
 		return
 	}
 	if l.GradientColorAnimate != nil {
-		l.GradientColorAnimate.Cancel()
+		cancelManagedAnimation(lyrics.AnimateManager, l.GradientColorAnimate)
 		l.GradientColorAnimate = nil
 	}
 	if len(l.OuterSyllableElements) == 0 {
@@ -1048,15 +1124,15 @@ func (AnimationLayer) FrameAnimate(l *Line, lyrics *Lyrics, fd float64) {
 			if e == nil || e.Animate == nil {
 				continue
 			}
-			e.Animate.Cancel()
+			cancelManagedAnimation(lyrics.AnimateManager, e.Animate)
 			e.Animate = nil
 		}
-		applyRealtimeOffsets(l.OuterSyllableElements, lyrics.Position, fd)
+		l.applyRealtimeOffsets(lyrics.Position, fd)
 	} else {
 		for elei, e := range l.OuterSyllableElements {
 			kf := createFrames(l.OuterSyllableElements, elei, l.OuterSyllableElements[0].StartTime, l.OuterSyllableElements[len(l.OuterSyllableElements)-1].EndTime, fd)
 			if e.Animate != nil {
-				e.Animate.Cancel()
+				cancelManagedAnimation(lyrics.AnimateManager, e.Animate)
 				e.Animate = nil
 			}
 			e.Animate = anim.NewKeyframeAnimation(
@@ -1138,7 +1214,7 @@ func (AnimationLayer) FrameAnimate(l *Line, lyrics *Lyrics, fd float64) {
 				} else {
 					// 当高亮被禁用或该词时长不足时，清理残留高亮状态。
 					if ele.HighlightAnimate != nil {
-						ele.HighlightAnimate.Cancel()
+						cancelManagedAnimation(lyrics.AnimateManager, ele.HighlightAnimate)
 						ele.HighlightAnimate = nil
 					}
 					if ele.BackgroundBlurText != nil {
@@ -1148,7 +1224,7 @@ func (AnimationLayer) FrameAnimate(l *Line, lyrics *Lyrics, fd float64) {
 				}
 
 				if ele.UpAnimate != nil {
-					ele.UpAnimate.Cancel()
+					cancelManagedAnimation(lyrics.AnimateManager, ele.UpAnimate)
 					ele.UpAnimate = nil
 				}
 

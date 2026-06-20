@@ -12,7 +12,7 @@ import (
 
 // useRealtimeOffsetFormula controls whether to compute karaoke offsets per-frame.
 // Set this to false to rollback to the createFrames keyframe strategy.
-var useRealtimeOffsetFormula = false
+var useRealtimeOffsetFormula = true
 
 // createFrames 生成卡拉OK逐字动画的关键帧
 // targetIndex: 当前正在生成动画的单词索引
@@ -200,6 +200,18 @@ func segmentProgress(now, start, end time.Duration) float64 {
 }
 
 func applyRealtimeOffsets(blocks []*SyllableElement, now time.Duration, fadeRatio float64) {
+	var metrics lineOffsetMetrics
+	applyRealtimeOffsetsWithMetrics(blocks, now, fadeRatio, &metrics)
+}
+
+func (l *Line) applyRealtimeOffsets(now time.Duration, fadeRatio float64) {
+	if l == nil {
+		return
+	}
+	applyRealtimeOffsetsWithMetrics(l.OuterSyllableElements, now, fadeRatio, &l.OffsetMetrics)
+}
+
+func applyRealtimeOffsetsWithMetrics(blocks []*SyllableElement, now time.Duration, fadeRatio float64, metrics *lineOffsetMetrics) {
 	n := len(blocks)
 	if n == 0 {
 		return
@@ -217,8 +229,7 @@ func applyRealtimeOffsets(blocks []*SyllableElement, now time.Duration, fadeRati
 		now = lastEnd
 	}
 
-	widths := make([]float64, n)
-	prefix := make([]float64, n)
+	widths, prefix := realtimeOffsetMetrics(blocks, metrics)
 	movedWidth := 0.0
 	firstProgress := 0.0
 	lastProgress := 0.0
@@ -227,14 +238,7 @@ func applyRealtimeOffsets(blocks []*SyllableElement, now time.Duration, fadeRati
 		if block == nil || block.SyllableImage == nil {
 			continue
 		}
-		w := block.SyllableImage.GetWidth()
-		if w <= 0 {
-			w = 1
-		}
-		widths[i] = w
-		if i > 0 {
-			prefix[i] = prefix[i-1] + widths[i-1]
-		}
+		w := widths[i]
 
 		progress := segmentProgress(now, block.StartTime, block.EndTime)
 		movedWidth += w * progress
@@ -271,4 +275,42 @@ func applyRealtimeOffsets(blocks []*SyllableElement, now time.Duration, fadeRati
 		currentPos := initialPos + movedWidth + fadeWidth*extraFadeFactor
 		block.NowOffset = clampOffsetRange(currentPos, minOffset)
 	}
+}
+
+func realtimeOffsetMetrics(blocks []*SyllableElement, metrics *lineOffsetMetrics) ([]float64, []float64) {
+	n := len(blocks)
+	if metrics == nil {
+		metrics = &lineOffsetMetrics{}
+	}
+	if metrics.valid && metrics.elementCount == n && len(metrics.widths) >= n && len(metrics.prefix) >= n {
+		return metrics.widths[:n], metrics.prefix[:n]
+	}
+	if cap(metrics.widths) < n {
+		metrics.widths = make([]float64, n)
+	} else {
+		metrics.widths = metrics.widths[:n]
+	}
+	if cap(metrics.prefix) < n {
+		metrics.prefix = make([]float64, n)
+	} else {
+		metrics.prefix = metrics.prefix[:n]
+	}
+	for i, block := range blocks {
+		w := 1.0
+		if block != nil && block.SyllableImage != nil {
+			w = block.SyllableImage.GetWidth()
+			if w <= 0 {
+				w = 1
+			}
+		}
+		metrics.widths[i] = w
+		if i == 0 {
+			metrics.prefix[i] = 0
+		} else {
+			metrics.prefix[i] = metrics.prefix[i-1] + metrics.widths[i-1]
+		}
+	}
+	metrics.valid = true
+	metrics.elementCount = n
+	return metrics.widths, metrics.prefix
 }

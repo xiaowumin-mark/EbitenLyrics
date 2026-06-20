@@ -24,6 +24,7 @@ import (
 )
 
 const lastResortFamily = "__font_last_resort__"
+const cjkProbeText = "中文"
 
 const (
 	glyphSupportCacheSize     = 16384
@@ -266,6 +267,12 @@ func systemFallbackFamilies() []string {
 		return normalizeFamilies([]string{
 			"Segoe UI",
 			"Segoe UI Variable",
+			"PingFang",
+			"PingFang UI",
+			"PingFang SC",
+			"PingFang TC",
+			"PingFang HK",
+			"Hiragino Sans GB",
 			"Microsoft YaHei UI",
 			"Microsoft YaHei",
 			"Microsoft JhengHei UI",
@@ -528,6 +535,10 @@ func (m *FontManager) GetFaceForText(req FontRequest, size float64, content stri
 	if size <= 0 {
 		return nil, errors.New("font size must be positive")
 	}
+	req = req.Normalized()
+	if content == "" && req.RequireCJK {
+		content = cjkProbeText
+	}
 
 	chain, err := m.ResolveChain(req)
 	if err != nil {
@@ -700,35 +711,50 @@ func (m *FontManager) buildFamilyChain(req FontRequest) []string {
 	seen := map[string]struct{}{}
 	out := make([]string, 0, len(req.Families)+len(m.systemFallbacks)+4)
 
-	var expand func(string)
-	expand = func(family string) {
+	add := func(family string) bool {
 		family = strings.TrimSpace(family)
 		if family == "" {
-			return
+			return false
 		}
+		key := normalizeName(family)
+		if key == "" {
+			return false
+		}
+		if _, ok := seen[key]; ok {
+			return false
+		}
+		seen[key] = struct{}{}
+		out = append(out, family)
+		return true
+	}
+
+	var expandFallbacks func(string)
+	expandFallbacks = func(family string) {
 		key := normalizeName(family)
 		if key == "" {
 			return
 		}
-		if _, ok := seen[key]; ok {
-			return
-		}
-		seen[key] = struct{}{}
-		out = append(out, family)
 
 		m.mu.RLock()
 		rules := append([]string{}, m.fallbackRules[key]...)
 		m.mu.RUnlock()
 		for _, fallback := range rules {
-			expand(fallback)
+			if add(fallback) {
+				expandFallbacks(fallback)
+			}
 		}
 	}
 
 	for _, family := range req.Families {
-		expand(family)
+		add(family)
+	}
+	for _, family := range req.Families {
+		expandFallbacks(family)
 	}
 	for _, family := range m.systemFallbacks {
-		expand(family)
+		if add(family) {
+			expandFallbacks(family)
+		}
 	}
 	return out
 }

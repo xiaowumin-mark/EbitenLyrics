@@ -23,6 +23,8 @@ type ImageCacheStats struct {
 	TextMaskRefs    int
 	GradientEntries int
 	GradientRefs    int
+	ScratchImages   int
+	ScratchPixels   int
 }
 
 type sharedImage struct {
@@ -267,8 +269,11 @@ func releaseGradient(key gradientKey) {
 
 func PurgeSharedImageCache() {
 	sharedImageStore.purge()
+	syllableScratchImages.purge()
 }
 
 func SharedImageCacheStats() ImageCacheStats {
-	return sharedImageStore.stats()
+	stats := sharedImageStore.stats()
+	stats.ScratchImages, stats.ScratchPixels = syllableScratchImages.stats()
+	return stats
 }

@@ -3,6 +3,7 @@ package anim
 import (
 	"math"
 	"testing"
+	"time"
 )
 
 func TestEaseFunctionsStayFiniteAtCommonSamples(t *testing.T) {
@@ -117,5 +118,63 @@ func TestEaseCombinators(t *testing.T) {
 	}
 	if got := chained(1); math.Abs(got-1) > 1e-9 {
 		t.Fatalf("ChainEase expected 1 at end, got %v", got)
+	}
+}
+
+func TestManagerDropsCanceledPendingTween(t *testing.T) {
+	manager := NewManager(false)
+	updated := false
+	finished := false
+	tween := NewTween(
+		"pending-tween",
+		time.Second,
+		0,
+		1,
+		0,
+		1,
+		Linear,
+		func(float64) { updated = true },
+		func() { finished = true },
+	)
+
+	manager.Add(tween)
+	tween.Cancel()
+	manager.Update(16 * time.Millisecond)
+
+	if updated || finished {
+		t.Fatalf("canceled pending tween ran callbacks: updated=%v finished=%v", updated, finished)
+	}
+	if len(manager.pending) != 0 || len(manager.active) != 0 {
+		t.Fatalf("manager retained canceled tween: pending=%d active=%d", len(manager.pending), len(manager.active))
+	}
+}
+
+func TestManagerDropsCanceledPendingKeyframeAnimation(t *testing.T) {
+	manager := NewManager(false)
+	updated := false
+	finished := false
+	animation := NewKeyframeAnimation(
+		"pending-keyframe",
+		time.Second,
+		0,
+		1,
+		false,
+		[]Keyframe{
+			{Offset: 0, Values: []float64{0}},
+			{Offset: 1, Values: []float64{1}},
+		},
+		func([]float64) { updated = true },
+		func() { finished = true },
+	)
+
+	manager.Add(animation)
+	animation.Cancel()
+	manager.Update(16 * time.Millisecond)
+
+	if updated || finished {
+		t.Fatalf("canceled pending keyframe ran callbacks: updated=%v finished=%v", updated, finished)
+	}
+	if len(manager.pending) != 0 || len(manager.active) != 0 {
+		t.Fatalf("manager retained canceled keyframe: pending=%d active=%d", len(manager.pending), len(manager.active))
 	}
 }

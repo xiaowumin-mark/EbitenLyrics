@@ -35,6 +35,12 @@ func (m *FontManager) ParseRequest(base FontRequest, cfg map[string]any) (FontRe
 	if v, ok := cfg["italic"]; ok {
 		req.Italic = normalizeBool(v, req.Italic)
 	}
+	if v, ok := cfg["requireCJK"]; ok {
+		req.RequireCJK = normalizeBool(v, req.RequireCJK)
+	}
+	if v, ok := cfg["require_cjk"]; ok {
+		req.RequireCJK = normalizeBool(v, req.RequireCJK)
+	}
 
 	var customPath string
 	for _, key := range []string{"path", "fontPath", "font_file", "file"} {
@@ -81,6 +87,9 @@ func (m *FontManager) ApplyEnvRequest(base FontRequest) (FontRequest, error) {
 	}
 	if path := strings.TrimSpace(os.Getenv("EBITENLYRICS_FONT_PATH")); path != "" {
 		cfg["path"] = path
+	}
+	if requireCJKRaw := strings.TrimSpace(strings.ToLower(os.Getenv("EBITENLYRICS_FONT_REQUIRE_CJK"))); requireCJKRaw != "" {
+		cfg["requireCJK"] = requireCJKRaw
 	}
 
 	return m.ParseRequest(base, cfg)

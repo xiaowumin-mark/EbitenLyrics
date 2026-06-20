@@ -7,6 +7,8 @@ package main
 var Time float
 var Volume float
 var Alpha float
+var SaturationBoost float
+var CoverScale float
 
 const inv255 = 1.0 / 255.0
 const halfInv255 = 0.5 / 255.0
@@ -37,6 +39,11 @@ func mirrorCoord(x float) float {
 
 func mirrorRepeat(uv vec2) vec2 {
 	return vec2(mirrorCoord(uv.x), mirrorCoord(uv.y))
+}
+
+func adjustSaturation(rgb vec3, saturation float) vec3 {
+	luma := dot(rgb, vec3(0.2126, 0.7152, 0.0722))
+	return clamp(mix(vec3(luma), rgb, saturation), vec3(0.0), vec3(1.0))
 }
 
 // Pixel-unit shaders use point sampling internally.
@@ -76,9 +83,17 @@ func Fragment(dstPos vec4, srcPos vec2, color vec4) vec4 {
 	rotatedUV := rotate2D(centeredUV, timeVolume*2.0)
 	finalUV := rotatedUV*max(0.001, 1.0-volumeEffect) + vec2(0.5)
 	finalUV = mirrorRepeat(finalUV)
+	finalUV = (finalUV-vec2(0.5))/max(0.001, CoverScale) + vec2(0.5)
+	finalUV = mirrorRepeat(finalUV)
 	finalUV = clamp(finalUV, vec2(0.001), vec2(0.999))
 
 	result := sampleLinear(finalUV * size)
+	result.rgb = adjustSaturation(result.rgb, SaturationBoost)
+
+	dist := distance(uv, vec2(0.5))
+	vignette := smoothstep(0.8, 0.3, dist)
+	mask := 0.6 + vignette*0.4
+	result.rgb *= mask
 
 	alphaVolumeFactor := Alpha * max(0.5, 1.0-Volume*0.5)
 	result.rgb *= color.rgb * alphaVolumeFactor

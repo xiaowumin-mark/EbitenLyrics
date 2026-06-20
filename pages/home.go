@@ -21,6 +21,7 @@ import (
 	"github.com/xiaowumin-mark/EbitenLyrics/debugpanel"
 	"github.com/xiaowumin-mark/EbitenLyrics/evbus"
 	f "github.com/xiaowumin-mark/EbitenLyrics/font"
+	"github.com/xiaowumin-mark/EbitenLyrics/localaudio"
 	"github.com/xiaowumin-mark/EbitenLyrics/lp"
 	"github.com/xiaowumin-mark/EbitenLyrics/lyrics"
 	"github.com/xiaowumin-mark/EbitenLyrics/router"
@@ -45,6 +46,7 @@ type Home struct {
 	router.BaseScene
 	FontManager *f.FontManager
 	FontRequest f.FontRequest
+	LocalAudio  *localaudio.Manager
 
 	LyricsImageAnim *anim.Tween
 	AnimateManager  *anim.Manager
@@ -61,6 +63,9 @@ type Home struct {
 	SmartTranslateWrap bool
 	EnableBlur         bool
 	BlurStrength       float64
+	BGScaleStrength    float64
+	BGSatStrength      float64
+	BGCoverStrength    float64
 
 	eventsBound bool
 
@@ -82,6 +87,8 @@ type Home struct {
 	pendingCover         image.Image
 	hasPendingLowFreq    bool
 	pendingLowFreqVolume float64
+	currentLowFreqVolume float64
+	currentLowFreqSource string
 	hasPendingFontConfig bool
 	pendingFontConfig    map[string]any
 	hasPendingMusicInfo  bool
@@ -113,6 +120,7 @@ type lyricsDebugStats struct {
 	totalImages      int
 	approxImageBytes uint64
 	coverImages      int
+	componentImages  int
 	lineImages       int
 	translateImages  int
 	textMaskImages   int
@@ -189,7 +197,22 @@ func (h *Home) collectLyricsDebugStats() lyricsDebugStats {
 		addImage(h.Cover)
 	}
 
-	if h.LyricsControl == nil || h.LyricsControl.LyricsControl == nil {
+	if h.LyricsControl == nil {
+		return stats
+	}
+	if h.LyricsControl.Image != nil {
+		stats.componentImages++
+		addImage(h.LyricsControl.Image)
+	}
+	if h.LyricsControl.StaticImage != nil {
+		stats.componentImages++
+		addImage(h.LyricsControl.StaticImage)
+	}
+	if h.LyricsControl.TransitionImage != nil {
+		stats.componentImages++
+		addImage(h.LyricsControl.TransitionImage)
+	}
+	if h.LyricsControl.LyricsControl == nil {
 		return stats
 	}
 	control := h.LyricsControl.LyricsControl
@@ -273,10 +296,12 @@ func (h *Home) updateMemoryPanel() {
 	var mem runtime.MemStats
 	runtime.ReadMemStats(&mem)
 	stats := h.collectLyricsDebugStats()
+	sharedStats := lyrics.SharedImageCacheStats()
 
 	h.memPanel = fmt.Sprintf(
 		"Mem HeapAlloc:%s HeapInuse:%s HeapSys:%s NextGC:%s NumGC:%d Goroutines:%d\n"+
-			"Image Total:%d Approx:%s Cover:%d Line:%d TS:%d Mask:%d Grad:%d Temp:%d Shadow:%d\n"+
+			"Image Total:%d Approx:%s Cover:%d Comp:%d Line:%d TS:%d Mask:%d Grad:%d Temp:%d Shadow:%d\n"+
+			"Shared Mask:%d/%d Grad:%d/%d Scratch:%d %s\n"+
 			"Lyrics Main:%d BG:%d Rendered:%d Active:%d Syllables:%d Elements:%d",
 		formatBytesIEC(mem.HeapAlloc),
 		formatBytesIEC(mem.HeapInuse),
@@ -287,12 +312,19 @@ func (h *Home) updateMemoryPanel() {
 		stats.totalImages,
 		formatBytesIEC(stats.approxImageBytes),
 		stats.coverImages,
+		stats.componentImages,
 		stats.lineImages,
 		stats.translateImages,
 		stats.textMaskImages,
 		stats.gradientImages,
 		stats.tempImages,
 		stats.shadowImages,
+		sharedStats.TextMaskEntries,
+		sharedStats.TextMaskRefs,
+		sharedStats.GradientEntries,
+		sharedStats.GradientRefs,
+		sharedStats.ScratchImages,
+		formatBytesIEC(uint64(sharedStats.ScratchPixels)*4),
 		stats.mainLines,
 		stats.bgLines,
 		stats.renderedLines,
@@ -575,7 +607,20 @@ func (h *Home) debugSummaryText() string {
 		fmt.Sprintf("字重: %d", h.fontWeight),
 		fmt.Sprintf("斜体: %v", h.fontItalic),
 		fmt.Sprintf("用户滚动: %v", h.isUserScrolling),
-		fmt.Sprintf("低频音量: %.2f", h.pendingLowFreqVolume),
+		fmt.Sprintf("低频音量: %.2f", h.currentLowFreqVolume),
+		fmt.Sprintf("低频来源: %s", h.currentLowFreqSource),
+		fmt.Sprintf("低频原始: %.2f", func() float64 {
+			if h.LocalAudio == nil {
+				return 0
+			}
+			return h.LocalAudio.Raw()
+		}()),
+		fmt.Sprintf("低频缓冲: %d", func() int {
+			if h.LocalAudio == nil {
+				return 0
+			}
+			return h.LocalAudio.BufferedSamples()
+		}()),
 		"快捷键: Esc 显示/隐藏面板, F2 液态玻璃测试, F5/F6 切字体, F7/F8 切字重, F9 切斜体, F10 重载字体配置, F11 全屏",
 	}
 	return strings.Join(lines, "\n")
@@ -592,8 +637,9 @@ func (h *Home) runtimeStatusText() string {
 	}
 
 	return fmt.Sprintf(
-		"WebSocket: %s\nTPS: %.2f\nFPS: %.2f",
+		"WebSocket: %s\n低频来源: %s\nTPS: %.2f\nFPS: %.2f",
 		wsStatus,
+		h.currentLowFreqSource,
 		ebiten.ActualTPS(),
 		ebiten.ActualFPS(),
 	)
@@ -663,6 +709,18 @@ func (h *Home) setupDebugPanel() {
 			ebiten.SetFullscreen(!ebiten.IsFullscreen())
 		})
 
+	panel.Group("背景", true).
+		Description("调整低频联动的背景缩放与饱和度强度。").
+		Float("低频缩放强度", &h.BGScaleStrength, 0, 0.5, 0.005, 3, func(value float64) {
+			h.setBGScaleStrength(value)
+		}).
+		Float("低频饱和度强度", &h.BGSatStrength, 0, 3, 0.05, 2, func(value float64) {
+			h.setBGSatStrength(value)
+		}).
+		Float("低频封面缩放强度", &h.BGCoverStrength, 0, 1, 0.005, 3, func(value float64) {
+			h.setBGCoverStrength(value)
+		})
+
 	panel.Group("统计", true).
 		Text("", func() string {
 			return h.debugSummaryText()
@@ -699,6 +757,30 @@ func (h *Home) setBlurStrength(strength float64) {
 	h.BlurStrength = strength
 	if h.LyricsControl != nil {
 		h.LyricsControl.SetBlurStrength(strength)
+	}
+}
+
+func (h *Home) setBGScaleStrength(strength float64) {
+	h.BGScaleStrength = strength
+	if h.MeshRenderer != nil {
+		h.MeshRenderer.SetScaleStrength(strength)
+		h.BGScaleStrength = h.MeshRenderer.ScaleStrength()
+	}
+}
+
+func (h *Home) setBGSatStrength(strength float64) {
+	h.BGSatStrength = strength
+	if h.MeshRenderer != nil {
+		h.MeshRenderer.SetSaturationStrength(strength)
+		h.BGSatStrength = h.MeshRenderer.SaturationStrength()
+	}
+}
+
+func (h *Home) setBGCoverStrength(strength float64) {
+	h.BGCoverStrength = strength
+	if h.MeshRenderer != nil {
+		h.MeshRenderer.SetCoverScaleStrength(strength)
+		h.BGCoverStrength = h.MeshRenderer.CoverScaleStrength()
 	}
 }
 
@@ -874,11 +956,33 @@ func (h *Home) applyPendingEvents() {
 	}
 
 	if hasLowFreq && h.MeshRenderer != nil {
+		h.currentLowFreqVolume = lowFreqVolume
 		h.MeshRenderer.SetLowFreqVolume(lowFreqVolume)
+	} else if hasLowFreq {
+		h.currentLowFreqVolume = lowFreqVolume
 	}
 
 	if hasProgress && h.LyricsControl != nil && !h.isUserScrolling {
 		h.LyricsControl.Update(progress)
+	}
+}
+
+func (h *Home) applyLocalLowFreq() {
+	if h.LocalAudio == nil || !h.LocalAudio.Active() {
+		ws.SetWSAudioFallbackEnabled(true)
+		if h.currentLowFreqSource == "" || h.currentLowFreqSource == "localaudio-loopback" {
+			h.currentLowFreqSource = "ws-fallback"
+		}
+		h.currentLowFreqVolume = 0
+		return
+	}
+
+	ws.SetWSAudioFallbackEnabled(false)
+	lowFreqVolume := h.LocalAudio.Latest()
+	h.currentLowFreqSource = h.LocalAudio.Source()
+	h.currentLowFreqVolume = lowFreqVolume
+	if h.MeshRenderer != nil {
+		h.MeshRenderer.SetLowFreqVolume(lowFreqVolume)
 	}
 }
 
@@ -1013,7 +1117,10 @@ func (h *Home) OnCreate() {
 	h.FontSize = 50
 	h.FD = 0.5
 	h.EnableBlur = true
-	h.BlurStrength = 1
+	h.BlurStrength = 1.5
+	h.BGScaleStrength = 0.05
+	h.BGSatStrength = 1.45
+	h.BGCoverStrength = 0.10
 	h.isPlaying = true
 	h.UserScale = lp.UserScale()
 	h.SmartTranslateWrap = true
@@ -1049,6 +1156,9 @@ func (h *Home) OnCreate() {
 		log.Printf("create mesh renderer failed: %v", err)
 	} else {
 		h.MeshRenderer = meshRenderer
+		h.MeshRenderer.SetScaleStrength(h.BGScaleStrength)
+		h.MeshRenderer.SetSaturationStrength(h.BGSatStrength)
+		h.MeshRenderer.SetCoverScaleStrength(h.BGCoverStrength)
 	}
 	h.CoverPosition = lyrics.NewPosition(0, 0, 0, 0)
 	h.memSampleInterval = 500 * time.Millisecond
@@ -1100,6 +1210,7 @@ func (h *Home) Update() error {
 	}
 
 	h.applyPendingEvents()
+	h.applyLocalLowFreq()
 	h.debugInputCaptured = false
 	if h.DebugPanel != nil {
 		captured, err := h.DebugPanel.Update()
